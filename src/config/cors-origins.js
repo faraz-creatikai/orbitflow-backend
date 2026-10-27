@@ -1,0 +1,12 @@
+// config/allowedOrigins.js
+export const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5678/",
+  "https://aiworksforce.com",
+  "https://www.aiworksforce.com",
+  "https://app.aiworksforce.com",
+  "https://creatikai.com",
+  "https://orbitflow-dash.vercel.app"
+];
+
+export const clientUrl = "https://app.aiworksforce.com";

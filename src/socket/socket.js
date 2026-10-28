@@ -4,7 +4,7 @@ import { registerPresence, startPresenceHeartbeat, closeStaleSessions } from "./
 // 👇 Import the WhatsApp controllers
 import { initWhatsApp, stopWhatsAppIdle, getWhatsAppConnectionState } from "../config/baileys.js";
 import { protectCustomerRoute } from "../middlewares/auth.js";
-import { parse } from "cookie";  
+import { parse } from "cookie";
 
 let io;
 
@@ -60,48 +60,35 @@ export const initSocket = async (server) => {
 
     registerPresence(io, socket);
 
-    // ─── WHATSAPP VIEWER TRACKING ──────────────────────────────────────
+    // ─── WHATSAPP VIEWER TRACKING (per admin) ───
+    const waRoom = `whatsapp_qr_viewers:${adminId}`;
 
-    // 1. User opens the QR page
     socket.on("whatsapp:start_viewing", () => {
-      socket.join("whatsapp_qr_viewers");
+      if (!adminId) return;
+      socket.join(waRoom);
 
-      const viewerCount = io.sockets.adapter.rooms.get("whatsapp_qr_viewers")?.size || 0;
-      console.log(`👀 WhatsApp QR Viewer joined. Total viewing: ${viewerCount}`);
-
-      // If this is the FIRST person to open the page, wake up the engine
-      // in default QR mode. Pairing mode is only ever started explicitly
-      // via the /whatsapp-connection-pairing-code route, never here.
+      const viewerCount = io.sockets.adapter.rooms.get(waRoom)?.size || 0;
       if (viewerCount === 1) {
-        const state = getWhatsAppConnectionState();
+        const state = getWhatsAppConnectionState(adminId);
         if (state.status === 'loading') {
-          console.log("🚦 Waking up WhatsApp engine via Socket...");
-          initWhatsApp();
+          initWhatsApp(adminId);
         }
       }
     });
 
-    // 2. User clicks the back button or navigates away
     socket.on("whatsapp:stop_viewing", () => {
-      socket.leave("whatsapp_qr_viewers");
+      socket.leave(waRoom);
       checkViewersAndStop();
     });
 
-    // 3. User closes the browser completely (Socket drops)
     socket.on("disconnect", () => {
-      // The socket automatically leaves all rooms on disconnect,
-      // we just need to check if the room is now empty.
       checkViewersAndStop();
     });
 
-    // Helper to kill the engine if the room is empty
     function checkViewersAndStop() {
-      const viewerCount = io.sockets.adapter.rooms.get("whatsapp_qr_viewers")?.size || 0;
-      if (viewerCount === 0) {
-        stopWhatsAppIdle(); // This function already checks if it's safe to stop (i.e. not logged in)
-      } else {
-        console.log(`👀 User left, but ${viewerCount} admin(s) are still viewing.`);
-      }
+      if (!adminId) return;
+      const viewerCount = io.sockets.adapter.rooms.get(waRoom)?.size || 0;
+      if (viewerCount === 0) stopWhatsAppIdle(adminId);
     }
   });
 

@@ -57,23 +57,23 @@ const getMimeType = (url = "") => {
   return map[ext] || "application/octet-stream";
 };
 
-export const sendBaileysWhatsApp = async (to, message, imageUrl = null, extra = {}) => {
+export const sendBaileysWhatsApp = async (adminId, to, message, imageUrl = null, extra = {}) => {
   try {
-    let sock = getWhatsAppSocket();
+    let sock = getWhatsAppSocket(adminId);
 
     // 1. Wake up engine if asleep
     if (!sock) {
       console.log("🚦 Engine is asleep. Waking up WhatsApp to send message...");
-      initWhatsApp();
+      initWhatsApp(adminId);
 
       let retries = 0;
-      while (getWhatsAppConnectionState().status !== 'connected' && retries < 15) {
+      while (getWhatsAppConnectionState(adminId).status !== 'connected' && retries < 15) {
         await delay(1000);
         retries++;
       }
 
-      sock = getWhatsAppSocket();
-      if (!sock || getWhatsAppConnectionState().status !== 'connected') {
+      sock = getWhatsAppSocket(adminId);
+      if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
         throw new Error("WhatsApp socket failed to connect to Meta in time. Are you logged out?");
       }
     }
@@ -234,23 +234,23 @@ export const sendBaileysWhatsApp = async (to, message, imageUrl = null, extra = 
   }
 };
 
-export const sendBaileysWhatsAppDirect = async (to, message, fileBuffer = null, extra = {}) => {
+export const sendBaileysWhatsAppDirect = async (adminId, to, message, fileBuffer = null, extra = {}) => {
   try {
-    let sock = getWhatsAppSocket();
+    let sock = getWhatsAppSocket(adminId);
 
     // 1. 🛑 FIX: Wait if socket is completely missing OR if it's currently reconnecting
-    if (!sock || getWhatsAppConnectionState().status !== 'connected') {
+    if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
       console.log("🚦 WhatsApp engine is reconnecting or asleep. Waiting...");
-      if (!sock) initWhatsApp();
+      if (!sock) initWhatsApp(adminId);
 
       let retries = 0;
-      while (getWhatsAppConnectionState().status !== 'connected' && retries < 15) {
+      while (getWhatsAppConnectionState(adminId).status !== 'connected' && retries < 15) {
         await delay(1000);
         retries++;
       }
 
-      sock = getWhatsAppSocket();
-      if (!sock || getWhatsAppConnectionState().status !== 'connected') {
+      sock = getWhatsAppSocket(adminId);
+      if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
         throw new Error("WhatsApp socket failed to stabilize/connect.");
       }
     }
@@ -327,8 +327,8 @@ export const sendBaileysWhatsAppDirect = async (to, message, fileBuffer = null, 
       if (sendError.message.toLowerCase().includes('close') || sendError.message.toLowerCase().includes('timeout')) {
         console.warn("⚠️ WhatsApp connection dropped during upload. Retrying once...");
         await delay(2000);
-        sock = getWhatsAppSocket(); // Grab fresh socket reference
-        if (sock && getWhatsAppConnectionState().status === 'connected') {
+        sock = getWhatsAppSocket(adminId); // Grab fresh socket reference
+        if (sock && getWhatsAppConnectionState(adminId).status === 'connected') {
           result = await sock.sendMessage(jid, content);
         } else {
           throw sendError;

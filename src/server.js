@@ -8,7 +8,7 @@ import { startCallLogSync, syncCallLogsInternal } from "./jobs/syncCallLogs.js";
 import { initFacebookCron, initInstagramCron } from "./jobs/instagramScheduler.js";
 import { initSocket } from "./socket/socket.js";
 import { deleteOldNotifications, initFollowupNotificationCron } from "./jobs/notification/notificationEvents.js";
-import { initWhatsApp } from "./config/baileys.js";
+/* import { initWhatsApp } from "./config/baileys.js"; */
 import { sweepOldUploads } from "./jobs/cleanupUploads.js";
 import "./jobs/attendance.js"; // ← Import the attendance job to ensure it runs
 import { initializeAiCronJobs } from "./jobs/aiLiveJob.js";

@@ -13,8 +13,10 @@ import { getWhatsAppConnectionState, getWhatsAppSocket, initWhatsApp, logoutWhat
 import upload, { templateUpload } from "../config/multer.js";
 import cloudinary from "../config/cloudinary.js";
 import fs from "fs"
+import { protectRoute } from "../middlewares/auth.js";
 
 const messageRoutes = express.Router();
+messageRoutes.use(protectRoute);
 
 messageRoutes.post("/email", sendEmailByTemplate);
 messageRoutes.post("/whatsapp", sendBaileysWhatsAppByTemplate);
@@ -42,25 +44,25 @@ messageRoutes.post("/uploads/file", upload.single("file"), async (req, res) => {
 
 messageRoutes.get('/whatsapp-connection-status', (req, res) => {
   // Just return the instant state. Socket.io handles waking it up now!
-  const state = getWhatsAppConnectionState();
+  const state = getWhatsAppConnectionState(req.admin.id);
   res.json(state);
 });
 
 messageRoutes.post('/whatsapp-connection-logout', async (req, res) => {
   // Keep this! The UI button still calls it.
-  const result = await logoutWhatsApp();
+  const result = await logoutWhatsApp(req.admin.id);
   res.json(result);
 });
 
 messageRoutes.post('/whatsapp-connection-pairing-code', async (req, res) => {
   const { phoneNumber } = req.body;
- 
+
   if (!phoneNumber || typeof phoneNumber !== 'string') {
     return res.status(400).json({ success: false, error: 'phoneNumber is required' });
   }
- 
+
   try {
-    await startPairingConnection(phoneNumber);
+    await startPairingConnection(req.admin.id, phoneNumber);
     res.json({ success: true, message: 'Pairing requested — code will arrive via socket' });
   } catch (err) {
     console.error('Failed to start pairing connection:', err);

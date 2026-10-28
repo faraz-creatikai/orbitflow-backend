@@ -253,7 +253,7 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
           poll: template.whatsappPoll || undefined,
         };
 
-        const result = await sendBaileysWhatsApp(formattedPhone, message, imageUrl, extra);
+        const result = await sendBaileysWhatsApp(req.admin.id, formattedPhone, message, imageUrl, extra);
 
 
 
@@ -425,17 +425,17 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
           // Case A: Property has at least one image - Send text tied to the primary hero image
           if (firstImage) {
             const extra = { mediaType: "image", humanize: j === 0 }; // Only show typing state for the first property block
-            await sendBaileysWhatsApp(formattedPhone, messageBody, firstImage, extra);
+            await sendBaileysWhatsApp(req.admin.id, formattedPhone, messageBody, firstImage, extra);
 
             // Instantly pipe out any extra property photos or site plans as separate sequential payloads
             for (const mediaUrl of extraMediaUrls) {
               await delay(400); // Small procedural gap to keep deliveries in chronological block order
-              await sendBaileysWhatsApp(formattedPhone, "", mediaUrl, { mediaType: "image", humanize: false });
+              await sendBaileysWhatsApp(req.admin.id, formattedPhone, "", mediaUrl, { mediaType: "image", humanize: false });
             }
           } else {
             // Case B: Pure text layout
             const extra = { mediaType: "text", humanize: j === 0 };
-            await sendBaileysWhatsApp(formattedPhone, messageBody, null, extra);
+            await sendBaileysWhatsApp(req.admin.id, formattedPhone, messageBody, null, extra);
           }
 
           // Small delay between sending different property listings to the same customer
@@ -523,6 +523,7 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
 
         // 👇 2. PASS THE CONVERTED BUFFER
         const result = await sendBaileysWhatsAppDirect(
+          req.admin.id,
           formattedPhone,
           message,
           fileBuffer,

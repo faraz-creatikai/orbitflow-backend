@@ -1,4 +1,4 @@
-import { normalizeMessageContent, downloadMediaMessage } from '@whiskeysockets/baileys';
+import { normalizeMessageContent, downloadMediaMessage,decryptPollVote, jidNormalizedUser } from '@whiskeysockets/baileys';
 import prisma from '../config/prismaClient.js';
 import ApiError from '../utils/ApiError.js';
 import pino from 'pino';
@@ -62,6 +62,54 @@ const uploadMedia = async (m, parsed, sock) => {
     }
 };
 
+const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+const norm = (j) => (j ? jidNormalizedUser(j) : null); // strips the :device suffix
+
+// Returns true if the message is a poll vote (handled or not), so the caller stops.
+const handlePollVote = async (adminId, m, sock, emit) => {
+  const upd = normalizeMessageContent(m.message)?.pollUpdateMessage;
+  if (!upd) return false;
+  if (m.key.remoteJid?.endsWith('@g.us')) return true;
+
+  const creationKey = upd.pollCreationMessageKey;
+  const row = await prisma.whatsAppMessage.findUnique({
+    where: { adminId_waId: { adminId, waId: creationKey.id } },
+  });
+  if (!row || row.type !== 'poll' || !row.pollSecret) return true; // poll predates secret storage
+
+  const pollEncKey = Buffer.from(row.pollSecret, 'base64');
+
+  // All identities each side might be encrypted under (LID first, then phone number)
+  const me = uniq([norm(sock.user?.lid || sock.authState?.creds?.me?.lid), norm(sock.user?.id)]);
+  const them = uniq([m.key.remoteJid, m.key.remoteJidAlt, m.key.participant, m.key.participantAlt].map(norm));
+
+  const creators = row.fromMe ? me : them;
+  const voters = m.key.fromMe ? me : them;
+
+  let vote = null;
+  for (const pollCreatorJid of creators) {
+    for (const voterJid of voters) {
+      try {
+        vote = decryptPollVote(upd.vote, { pollEncKey, pollCreatorJid, pollMsgId: creationKey.id, voterJid });
+        break;
+      } catch { /* wrong JID pair, try the next one */ }
+    }
+    if (vote) break;
+  }
+  if (!vote) return true;
+
+  const options = row.pollOptions || [];
+  const hashes = (vote.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
+  const votes = {
+    ...(row.pollVotes || {}),
+    [m.key.fromMe ? 'me' : 'them']: options.filter((o) => hashes.includes(sha(o))),
+  };
+
+  await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
+  emit(adminId, 'whatsapp:poll_votes', { waId: row.waId, pollVotes: votes });
+  return true;
+};
+
 export const getStoredMessage = async (adminId, key) => {
   if (!key?.id) return undefined;
   const row = await prisma.whatsAppMessage.findUnique({
@@ -80,6 +128,7 @@ export const getStoredMessage = async (adminId, key) => {
 
 // Called from baileys.js on every messages.upsert
 export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
+     if (await handlePollVote(adminId, m, sock, emit)) return;
     const jid = m.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? m.key.remoteJidAlt : m.key.remoteJid;
     if (!jid?.endsWith('@s.whatsapp.net')) return;
 

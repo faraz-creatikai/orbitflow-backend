@@ -1,6 +1,7 @@
 import { normalizeMessageContent } from '@whiskeysockets/baileys';
-import prisma from '../config/prisma.js';          // ← adjust to your prisma import
-import { ApiError } from '../utils/ApiError.js';   // ← adjust to your ApiError import
+import prisma from '../config/prismaClient.js';
+import ApiError from '../utils/ApiError.js';
+
 
 const keyOf = (v) => String(v || '').replace(/\D/g, '').slice(-10);
 

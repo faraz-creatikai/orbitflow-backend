@@ -2,6 +2,7 @@ import { normalizeMessageContent, downloadMediaMessage } from '@whiskeysockets/b
 import prisma from '../config/prismaClient.js';
 import ApiError from '../utils/ApiError.js';
 import pino from 'pino';
+import cloudinary from '../config/cloudinary.js';
 
 
 const MAX_MEDIA_BYTES = 25 * 1024 * 1024; // skip downloading anything bigger

@@ -163,7 +163,10 @@ model WhatsAppMessage {
   lat         Float?
   lng         Float?
   pollOptions Json?
-  
+
+  pollSecret String?
+  pollVotes  Json?
+
   timestamp DateTime
   createdAt DateTime @default(now())
 

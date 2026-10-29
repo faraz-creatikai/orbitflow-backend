@@ -3,6 +3,7 @@ import prisma from '../config/prismaClient.js';
 import ApiError from '../utils/ApiError.js';
 import pino from 'pino';
 import cloudinary from '../config/cloudinary.js';
+import crypto from 'crypto';
 
 
 const MAX_MEDIA_BYTES = 25 * 1024 * 1024; // skip downloading anything bigger
@@ -25,91 +26,140 @@ const parse = (m) => {
         return { type: 'location', body: l.name || l.address || '', lat: l.degreesLatitude, lng: l.degreesLongitude };
     }
     const poll = c.pollCreationMessage || c.pollCreationMessageV2 || c.pollCreationMessageV3;
-    if (poll)
-        return { type: 'poll', body: poll.name || '', pollOptions: (poll.options || []).map((o) => o.optionName) };
+    if (poll) {
+        const secret = m.message?.messageContextInfo?.messageSecret || c.messageContextInfo?.messageSecret;
+        return {
+            type: 'poll',
+            body: poll.name || '',
+            pollOptions: (poll.options || []).map((o) => o.optionName),
+            pollSecret: secret ? Buffer.from(secret).toString('base64') : null,
+        };
+    }
     return null;
 };
 
 const uploadMedia = async (m, parsed, sock) => {
-  try {
-    if (Number(String(parsed.media.fileLength)) > MAX_MEDIA_BYTES) return null;
+    try {
+        if (Number(String(parsed.media.fileLength)) > MAX_MEDIA_BYTES) return null;
 
-    const buffer = await downloadMediaMessage(m, 'buffer', {}, {
-      logger: pino({ level: 'silent' }),
-      reuploadRequest: sock.updateMediaMessage,
-    });
+        const buffer = await downloadMediaMessage(m, 'buffer', {}, {
+            logger: pino({ level: 'silent' }),
+            reuploadRequest: sock.updateMediaMessage,
+        });
 
-    // documents go up as "raw" so the file keeps its real name/extension in the URL
-    const opts =
-      parsed.type === 'document'
-        ? { resource_type: 'raw', public_id: `whatsapp-inbox/${Date.now()}-${(parsed.fileName || 'file').replace(/[^\w.\-]/g, '_')}` }
-        : { resource_type: 'auto', folder: 'whatsapp-inbox' };
+        // documents go up as "raw" so the file keeps its real name/extension in the URL
+        const opts =
+            parsed.type === 'document'
+                ? { resource_type: 'raw', public_id: `whatsapp-inbox/${Date.now()}-${(parsed.fileName || 'file').replace(/[^\w.\-]/g, '_')}` }
+                : { resource_type: 'auto', folder: 'whatsapp-inbox' };
 
-    return await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload_stream(opts, (err, r) => (err ? reject(err) : resolve(r.secure_url))).end(buffer);
-    });
-  } catch (e) {
-    console.error('WhatsApp media upload failed:', e.message);
-    return null;
-  }
+        return await new Promise((resolve, reject) => {
+            cloudinary.uploader.upload_stream(opts, (err, r) => (err ? reject(err) : resolve(r.secure_url))).end(buffer);
+        });
+    } catch (e) {
+        console.error('WhatsApp media upload failed:', e.message);
+        return null;
+    }
+};
+
+export const getStoredMessage = async (adminId, key) => {
+  if (!key?.id) return undefined;
+  const row = await prisma.whatsAppMessage.findUnique({
+    where: { adminId_waId: { adminId, waId: key.id } },
+    select: { type: true, body: true, pollOptions: true, pollSecret: true },
+  });
+  if (!row || row.type !== 'poll' || !row.pollSecret) return undefined;
+  return {
+    messageContextInfo: { messageSecret: Buffer.from(row.pollSecret, 'base64') },
+    pollCreationMessage: {
+      name: row.body,
+      options: (row.pollOptions || []).map((optionName) => ({ optionName })),
+    },
+  };
 };
 
 // Called from baileys.js on every messages.upsert
 export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
-  const jid = m.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? m.key.remoteJidAlt : m.key.remoteJid;
-  if (!jid?.endsWith('@s.whatsapp.net')) return;
+    const jid = m.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? m.key.remoteJidAlt : m.key.remoteJid;
+    if (!jid?.endsWith('@s.whatsapp.net')) return;
 
-  const parsed = parse(m);
-  if (!parsed) return;
+    const parsed = parse(m);
+    if (!parsed) return;
 
-  const waId = m.key.id;
-  const fromMe = !!m.key.fromMe;
+    const waId = m.key.id;
+    const fromMe = !!m.key.fromMe;
 
-  let mediaUrl = null;
-  if (parsed.media) {
-    // don't download the same file twice if Baileys delivers the message again
-    const exists = await prisma.whatsAppMessage.findUnique({
-      where: { adminId_waId: { adminId, waId } },
-      select: { id: true },
-    });
-    if (exists) return;
-    mediaUrl = await uploadMedia(m, parsed, sock);
-  }
+    let mediaUrl = null;
+    if (parsed.media) {
+        // don't download the same file twice if Baileys delivers the message again
+        const exists = await prisma.whatsAppMessage.findUnique({
+            where: { adminId_waId: { adminId, waId } },
+            select: { id: true },
+        });
+        if (exists) return;
+        mediaUrl = await uploadMedia(m, parsed, sock);
+    }
 
-  try {
-    const row = await prisma.whatsAppMessage.create({
-      data: {
-        adminId,
-        phoneKey: keyOf(jid.split('@')[0]),
-        waId,
-        fromMe,
-        type: parsed.type,
-        body: parsed.body,
-        fileName: parsed.fileName || null,
-        mediaUrl,
-        lat: parsed.lat ?? null,
-        lng: parsed.lng ?? null,
-        pollOptions: parsed.pollOptions ?? undefined,
-        status: 'sent',
-        isRead: fromMe,
-        timestamp: new Date(Number(m.messageTimestamp || Date.now() / 1000) * 1000),
-      },
-    });
-    emit(adminId, 'whatsapp:message', row);
-  } catch (e) {
-    if (e.code !== 'P2002') console.error('saveWhatsAppMessage:', e.message);
-  }
+    try {
+        const row = await prisma.whatsAppMessage.create({
+            data: {
+                adminId,
+                phoneKey: keyOf(jid.split('@')[0]),
+                waId,
+                fromMe,
+                type: parsed.type,
+                body: parsed.body,
+                fileName: parsed.fileName || null,
+                mediaUrl,
+                lat: parsed.lat ?? null,
+                lng: parsed.lng ?? null,
+                pollOptions: parsed.pollOptions ?? undefined,
+                status: 'sent',
+                isRead: fromMe,
+                pollSecret: parsed.pollSecret ?? null,
+                timestamp: new Date(Number(m.messageTimestamp || Date.now() / 1000) * 1000),
+            },
+        });
+        emit(adminId, 'whatsapp:message', row);
+    } catch (e) {
+        if (e.code !== 'P2002') console.error('saveWhatsAppMessage:', e.message);
+    }
 };
 
 // Called from baileys.js on messages.update (✓ delivered / ✓✓ read ticks)
+const sha = (s) => crypto.createHash('sha256').update(Buffer.from(s)).digest('hex');
+
 export const updateWhatsAppStatus = async (adminId, updates, emit) => {
-    for (const u of updates) {
-        const st = u.update?.status;
-        if (!st || !u.key?.fromMe) continue;
-        const status = st >= 4 ? 'read' : st === 3 ? 'delivered' : 'sent';
-        const r = await prisma.whatsAppMessage.updateMany({ where: { adminId, waId: u.key.id }, data: { status } });
-        if (r.count) emit(adminId, 'whatsapp:message_status', { waId: u.key.id, status });
+  for (const u of updates) {
+    const waId = u.key?.id;
+    if (!waId) continue;
+
+    // ✓ delivered / ✓✓ read ticks
+    const st = u.update?.status;
+    if (st && u.key.fromMe) {
+      const status = st >= 4 ? 'read' : st === 3 ? 'delivered' : 'sent';
+      const r = await prisma.whatsAppMessage.updateMany({ where: { adminId, waId }, data: { status } });
+      if (r.count) emit(adminId, 'whatsapp:message_status', { waId, status });
     }
+
+    // poll votes (selectedOptions are SHA-256 hashes of the option names)
+    const pollUpdates = u.update?.pollUpdates;
+    if (pollUpdates?.length) {
+      const row = await prisma.whatsAppMessage.findUnique({ where: { adminId_waId: { adminId, waId } } });
+      if (!row || row.type !== 'poll') continue;
+
+      const options = row.pollOptions || [];
+      const votes = { ...(row.pollVotes || {}) };
+      for (const p of pollUpdates) {
+        const voter = p.pollUpdateMessageKey?.fromMe ? 'me' : 'them'; // 1-to-1 chat: only two voters
+        const hashes = (p.vote?.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
+        votes[voter] = options.filter((o) => hashes.includes(sha(o)));
+      }
+
+      await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
+      emit(adminId, 'whatsapp:poll_votes', { waId, pollVotes: votes });
+    }
+  }
 };
 
 // GET /whatsapp/inbox/summary → last message + unread count per chat

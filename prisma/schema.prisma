@@ -158,6 +158,12 @@ model WhatsAppMessage {
   fileName  String?
   status    String   @default("sent") // sent|delivered|read
   isRead    Boolean  @default(false)
+
+  mediaUrl    String?
+  lat         Float?
+  lng         Float?
+  pollOptions Json?
+  
   timestamp DateTime
   createdAt DateTime @default(now())
 

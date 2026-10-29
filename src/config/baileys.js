@@ -297,10 +297,10 @@ export const initWhatsApp = async (adminId, options = {}) => {
     }
   });
 
-    sock.ev.on('messages.upsert', ({ messages }) => {
+  sock.ev.on('messages.upsert', ({ messages }) => {
     if (myGeneration !== s.socketGeneration) return;
     for (const m of messages) {
-      saveWhatsAppMessage(adminId, m, emitToAdmin).catch((e) => console.error('save msg:', e.message));
+      saveWhatsAppMessage(adminId, m, emitToAdmin, sock).catch((e) => console.error('save msg:', e.message));
     }
   });
 

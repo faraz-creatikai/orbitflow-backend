@@ -120,6 +120,7 @@ export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
                 timestamp: new Date(Number(m.messageTimestamp || Date.now() / 1000) * 1000),
             },
         });
+        if (row.type === 'poll') console.log('📊 poll saved', row.waId, 'hasSecret:', !!row.pollSecret);
         emit(adminId, 'whatsapp:message', row);
     } catch (e) {
         if (e.code !== 'P2002') console.error('saveWhatsAppMessage:', e.message);
@@ -144,6 +145,7 @@ export const updateWhatsAppStatus = async (adminId, updates, emit) => {
 
     // poll votes (selectedOptions are SHA-256 hashes of the option names)
     const pollUpdates = u.update?.pollUpdates;
+    console.log('🗳️ pollUpdates decrypted', waId, pollUpdates.length);
     if (pollUpdates?.length) {
       const row = await prisma.whatsAppMessage.findUnique({ where: { adminId_waId: { adminId, waId } } });
       if (!row || row.type !== 'poll') continue;

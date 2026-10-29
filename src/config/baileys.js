@@ -301,6 +301,7 @@ export const initWhatsApp = async (adminId, options = {}) => {
   sock.ev.on('messages.upsert', ({ messages }) => {
     if (myGeneration !== s.socketGeneration) return;
     for (const m of messages) {
+      if (m.message?.pollUpdateMessage) console.log('🗳️ vote received for poll', m.message.pollUpdateMessage.pollCreationMessageKey?.id);
       saveWhatsAppMessage(adminId, m, emitToAdmin, sock).catch((e) => console.error('save msg:', e.message));
     }
   });

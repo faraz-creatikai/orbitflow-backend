@@ -54,6 +54,7 @@ export const initSocket = async (server) => {
       return; // customers never reach presence or the WhatsApp handlers
     }
     const adminId = socket.handshake.auth?.adminId;
+    console.log("🔌 admin socket connected", { adminId });
     if (adminId) {
       socket.join(`admin:${adminId}`);
     }
@@ -64,6 +65,7 @@ export const initSocket = async (server) => {
     const waRoom = `whatsapp_qr_viewers:${adminId}`;
 
     socket.on("whatsapp:start_viewing", () => {
+      console.log("🔎 start_viewing", { adminId });
       if (!adminId) return;
       socket.join(waRoom);
 
@@ -71,7 +73,7 @@ export const initSocket = async (server) => {
       if (viewerCount === 1) {
         const state = getWhatsAppConnectionState(adminId);
         if (state.status === 'loading') {
-          initWhatsApp(adminId);
+          initWhatsApp(adminId).catch((err) => console.error("initWhatsApp failed:", err.message));
         }
       }
     });

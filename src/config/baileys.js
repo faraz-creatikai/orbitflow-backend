@@ -97,9 +97,16 @@ export const initWhatsApp = async (adminId, options = {}) => {
   clearReconnectTimer(s);
 
   const myGeneration = ++s.socketGeneration;
-  const { version, isLatest } = await fetchLatestBaileysVersion();
-
-  const { state, saveCreds } = await useMultiFileAuthState(getAuthDir(adminId));
+  let version, state, saveCreds;
+  try {
+    ({ version } = await fetchLatestBaileysVersion());
+    ({ state, saveCreds } = await useMultiFileAuthState(getAuthDir(adminId)));
+  } catch (err) {
+    // Without this reset, isStarting stays true and this admin can never start again.
+    s.isStarting = false;
+    console.error(`❌ [${adminId}] WhatsApp init failed:`, err);
+    throw err;
+  }
 
   const sock = makeWASocket({
     version,

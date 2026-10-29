@@ -43,8 +43,8 @@ messageRoutes.post("/uploads/file", upload.single("file"), async (req, res) => {
 });
 
 messageRoutes.get('/whatsapp-connection-status', (req, res) => {
-  // Just return the instant state. Socket.io handles waking it up now!
   const state = getWhatsAppConnectionState(req.admin.id);
+  console.log("status check for", req.admin.id, "->", state.status);
   res.json(state);
 });
 

@@ -1,10 +1,11 @@
-import { normalizeMessageContent, downloadMediaMessage,decryptPollVote, jidNormalizedUser } from '@whiskeysockets/baileys';
+import { normalizeMessageContent, downloadMediaMessage, decryptPollVote, jidNormalizedUser } from '@whiskeysockets/baileys';
 import prisma from '../config/prismaClient.js';
 import ApiError from '../utils/ApiError.js';
 import pino from 'pino';
 import cloudinary from '../config/cloudinary.js';
 import crypto from 'crypto';
 
+//HELPERS
 
 const MAX_MEDIA_BYTES = 25 * 1024 * 1024; // skip downloading anything bigger
 
@@ -67,68 +68,102 @@ const norm = (j) => (j ? jidNormalizedUser(j) : null); // strips the :device suf
 
 // Returns true if the message is a poll vote (handled or not), so the caller stops.
 const handlePollVote = async (adminId, m, sock, emit) => {
-  const upd = normalizeMessageContent(m.message)?.pollUpdateMessage;
-  if (!upd) return false;
-  if (m.key.remoteJid?.endsWith('@g.us')) return true;
+    const upd = normalizeMessageContent(m.message)?.pollUpdateMessage;
+    if (!upd) return false;
+    if (m.key.remoteJid?.endsWith('@g.us')) return true;
 
-  const creationKey = upd.pollCreationMessageKey;
-  const row = await prisma.whatsAppMessage.findUnique({
-    where: { adminId_waId: { adminId, waId: creationKey.id } },
-  });
-  if (!row || row.type !== 'poll' || !row.pollSecret) return true; // poll predates secret storage
+    const creationKey = upd.pollCreationMessageKey;
+    const row = await prisma.whatsAppMessage.findUnique({
+        where: { adminId_waId: { adminId, waId: creationKey.id } },
+    });
+    if (!row || row.type !== 'poll' || !row.pollSecret) return true; // poll predates secret storage
 
-  const pollEncKey = Buffer.from(row.pollSecret, 'base64');
+    const pollEncKey = Buffer.from(row.pollSecret, 'base64');
 
-  // All identities each side might be encrypted under (LID first, then phone number)
-  const me = uniq([norm(sock.user?.lid || sock.authState?.creds?.me?.lid), norm(sock.user?.id)]);
-  const them = uniq([m.key.remoteJid, m.key.remoteJidAlt, m.key.participant, m.key.participantAlt].map(norm));
+    // All identities each side might be encrypted under (LID first, then phone number)
+    const me = uniq([norm(sock.user?.lid || sock.authState?.creds?.me?.lid), norm(sock.user?.id)]);
+    const them = uniq([m.key.remoteJid, m.key.remoteJidAlt, m.key.participant, m.key.participantAlt].map(norm));
 
-  const creators = row.fromMe ? me : them;
-  const voters = m.key.fromMe ? me : them;
+    const creators = row.fromMe ? me : them;
+    const voters = m.key.fromMe ? me : them;
 
-  let vote = null;
-  for (const pollCreatorJid of creators) {
-    for (const voterJid of voters) {
-      try {
-        vote = decryptPollVote(upd.vote, { pollEncKey, pollCreatorJid, pollMsgId: creationKey.id, voterJid });
-        break;
-      } catch { /* wrong JID pair, try the next one */ }
+    let vote = null;
+    for (const pollCreatorJid of creators) {
+        for (const voterJid of voters) {
+            try {
+                vote = decryptPollVote(upd.vote, { pollEncKey, pollCreatorJid, pollMsgId: creationKey.id, voterJid });
+                break;
+            } catch { /* wrong JID pair, try the next one */ }
+        }
+        if (vote) break;
     }
-    if (vote) break;
-  }
-  if (!vote) return true;
+    if (!vote) return true;
 
-  const options = row.pollOptions || [];
-  const hashes = (vote.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
-  const votes = {
-    ...(row.pollVotes || {}),
-    [m.key.fromMe ? 'me' : 'them']: options.filter((o) => hashes.includes(sha(o))),
-  };
+    const options = row.pollOptions || [];
+    const hashes = (vote.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
+    const votes = {
+        ...(row.pollVotes || {}),
+        [m.key.fromMe ? 'me' : 'them']: options.filter((o) => hashes.includes(sha(o))),
+    };
 
-  await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
-  emit(adminId, 'whatsapp:poll_votes', { waId: row.waId, pollVotes: votes });
-  return true;
+    await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
+    emit(adminId, 'whatsapp:poll_votes', { waId: row.waId, pollVotes: votes });
+    return true;
 };
 
+
+const RANK = { sent: 1, delivered: 2, read: 3 };
+const toStatus = (n) => (n >= 4 ? 'read' : n === 3 ? 'delivered' : 'sent');
+const higher = (a, b) => (RANK[b] > RANK[a] ? b : a);
+
+// statuses that arrived before their message row was saved
+const pendingStatus = new Map(); // waId -> status
+
+const applyStatus = async (adminId, waId, status, emit) => {
+    const row = await prisma.whatsAppMessage.findUnique({
+        where: { adminId_waId: { adminId, waId } },
+        select: { id: true, status: true },
+    });
+
+    if (!row) {
+        // row not saved yet: remember it, saveWhatsAppMessage will pick it up
+        pendingStatus.set(waId, higher(pendingStatus.get(waId) || 'sent', status));
+        if (pendingStatus.size > 500) pendingStatus.delete(pendingStatus.keys().next().value);
+        return;
+    }
+
+    if (RANK[status] <= RANK[row.status]) return; // never go backwards
+    await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { status } });
+    emit(adminId, 'whatsapp:message_status', { waId, status });
+};
+
+
+
+
+
+
+
+//controllers
+
 export const getStoredMessage = async (adminId, key) => {
-  if (!key?.id) return undefined;
-  const row = await prisma.whatsAppMessage.findUnique({
-    where: { adminId_waId: { adminId, waId: key.id } },
-    select: { type: true, body: true, pollOptions: true, pollSecret: true },
-  });
-  if (!row || row.type !== 'poll' || !row.pollSecret) return undefined;
-  return {
-    messageContextInfo: { messageSecret: Buffer.from(row.pollSecret, 'base64') },
-    pollCreationMessage: {
-      name: row.body,
-      options: (row.pollOptions || []).map((optionName) => ({ optionName })),
-    },
-  };
+    if (!key?.id) return undefined;
+    const row = await prisma.whatsAppMessage.findUnique({
+        where: { adminId_waId: { adminId, waId: key.id } },
+        select: { type: true, body: true, pollOptions: true, pollSecret: true },
+    });
+    if (!row || row.type !== 'poll' || !row.pollSecret) return undefined;
+    return {
+        messageContextInfo: { messageSecret: Buffer.from(row.pollSecret, 'base64') },
+        pollCreationMessage: {
+            name: row.body,
+            options: (row.pollOptions || []).map((optionName) => ({ optionName })),
+        },
+    };
 };
 
 // Called from baileys.js on every messages.upsert
 export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
-     if (await handlePollVote(adminId, m, sock, emit)) return;
+    if (await handlePollVote(adminId, m, sock, emit)) return;
     const jid = m.key.remoteJidAlt?.endsWith('@s.whatsapp.net') ? m.key.remoteJidAlt : m.key.remoteJid;
     if (!jid?.endsWith('@s.whatsapp.net')) return;
 
@@ -149,6 +184,14 @@ export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
         mediaUrl = await uploadMedia(m, parsed, sock);
     }
 
+    // a receipt may already be merged into the upsert, or may have arrived before we got here
+    let status = 'sent';
+    if (fromMe) {
+        if (typeof m.status === 'number') status = higher(status, toStatus(m.status));
+        status = higher(status, pendingStatus.get(waId) || 'sent');
+        pendingStatus.delete(waId);
+    }
+
     try {
         const row = await prisma.whatsAppMessage.create({
             data: {
@@ -163,7 +206,7 @@ export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
                 lat: parsed.lat ?? null,
                 lng: parsed.lng ?? null,
                 pollOptions: parsed.pollOptions ?? undefined,
-                status: 'sent',
+                status,
                 isRead: fromMe,
                 pollSecret: parsed.pollSecret ?? null,
                 timestamp: new Date(Number(m.messageTimestamp || Date.now() / 1000) * 1000),
@@ -180,37 +223,33 @@ export const saveWhatsAppMessage = async (adminId, m, emit, sock) => {
 const sha = (s) => crypto.createHash('sha256').update(Buffer.from(s)).digest('hex');
 
 export const updateWhatsAppStatus = async (adminId, updates, emit) => {
-  for (const u of updates) {
-    const waId = u.key?.id;
-    if (!waId) continue;
+    for (const u of updates) {
+        const waId = u.key?.id;
+        if (!waId) continue;
 
-    // ✓ delivered / ✓✓ read ticks
-    const st = u.update?.status;
-    if (st && u.key.fromMe) {
-      const status = st >= 4 ? 'read' : st === 3 ? 'delivered' : 'sent';
-      const r = await prisma.whatsAppMessage.updateMany({ where: { adminId, waId }, data: { status } });
-      if (r.count) emit(adminId, 'whatsapp:message_status', { waId, status });
+        // ✓ delivered / ✓✓ read ticks
+        const st = u.update?.status;
+        if (st && u.key.fromMe) await applyStatus(adminId, waId, toStatus(st), emit);
+
+        // poll votes (selectedOptions are SHA-256 hashes of the option names)
+        const pollUpdates = u.update?.pollUpdates;
+        console.log('🗳️ pollUpdates decrypted', waId, pollUpdates.length);
+        if (pollUpdates?.length) {
+            const row = await prisma.whatsAppMessage.findUnique({ where: { adminId_waId: { adminId, waId } } });
+            if (!row || row.type !== 'poll') continue;
+
+            const options = row.pollOptions || [];
+            const votes = { ...(row.pollVotes || {}) };
+            for (const p of pollUpdates) {
+                const voter = p.pollUpdateMessageKey?.fromMe ? 'me' : 'them'; // 1-to-1 chat: only two voters
+                const hashes = (p.vote?.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
+                votes[voter] = options.filter((o) => hashes.includes(sha(o)));
+            }
+
+            await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
+            emit(adminId, 'whatsapp:poll_votes', { waId, pollVotes: votes });
+        }
     }
-
-    // poll votes (selectedOptions are SHA-256 hashes of the option names)
-    const pollUpdates = u.update?.pollUpdates;
-    console.log('🗳️ pollUpdates decrypted', waId, pollUpdates.length);
-    if (pollUpdates?.length) {
-      const row = await prisma.whatsAppMessage.findUnique({ where: { adminId_waId: { adminId, waId } } });
-      if (!row || row.type !== 'poll') continue;
-
-      const options = row.pollOptions || [];
-      const votes = { ...(row.pollVotes || {}) };
-      for (const p of pollUpdates) {
-        const voter = p.pollUpdateMessageKey?.fromMe ? 'me' : 'them'; // 1-to-1 chat: only two voters
-        const hashes = (p.vote?.selectedOptions || []).map((h) => Buffer.from(h).toString('hex'));
-        votes[voter] = options.filter((o) => hashes.includes(sha(o)));
-      }
-
-      await prisma.whatsAppMessage.update({ where: { id: row.id }, data: { pollVotes: votes } });
-      emit(adminId, 'whatsapp:poll_votes', { waId, pollVotes: votes });
-    }
-  }
 };
 
 // GET /whatsapp/inbox/summary → last message + unread count per chat

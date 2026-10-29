@@ -5,7 +5,7 @@ import { getSocket } from '../socket/socket.js';
 import fs from 'fs/promises';
 import path from 'path';
 import pino from 'pino';
-import { updateWhatsAppStatus } from '../controllers/controller.whatsappInbox.js';
+import { saveWhatsAppMessage, updateWhatsAppStatus } from '../controllers/controller.whatsappInbox.js';
 
 // Verified against Baileys' source (src/Socket/socket.ts, the `genPairQR` loop
 // that fires on the `pair-device` stanza):

@@ -14,6 +14,7 @@ import upload, { templateUpload } from "../config/multer.js";
 import cloudinary from "../config/cloudinary.js";
 import fs from "fs"
 import { protectRoute } from "../middlewares/auth.js";
+import { getChatMessages, getInboxSummary, markChatRead } from "../controllers/controller.whatsappInbox.js";
 
 const messageRoutes = express.Router();
 messageRoutes.use(protectRoute);
@@ -22,6 +23,10 @@ messageRoutes.post("/email", sendEmailByTemplate);
 messageRoutes.post("/whatsapp", sendBaileysWhatsAppByTemplate);
 messageRoutes.post("/whatsapp/send-properties",sendBaileysWhatsAppProperties);
 messageRoutes.post("/whatsapp/direct-message",templateUpload.fields([{ name: "whatsappFile", maxCount: 5 }]),sendDirectWhatsAppMessage);
+
+messageRoutes.get('/whatsapp/inbox/summary', getInboxSummary);
+messageRoutes.get('/whatsapp/inbox/chat/:phoneKey', getChatMessages)
+messageRoutes.post('/whatsapp/inbox/chat/:phoneKey/read', markChatRead);
 
 messageRoutes.post("/uploads/file", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });

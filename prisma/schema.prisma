@@ -85,6 +85,7 @@ model Admin {
   callingAgentConfigs CallingAgentConfig[]
 
   linkedinAccount LinkedinAccount?
+  whatsappMessages WhatsAppMessage[]
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -143,6 +144,25 @@ model CallingAgentConfig {
   updatedAt DateTime @updatedAt
 
   @@index([isActive]) // Optimizes the database query when searching for the active agent
+}
+
+model WhatsAppMessage {
+  id        String   @id @default(uuid())
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  phoneKey  String   // last 10 digits of the customer's number
+  waId      String   // WhatsApp message id
+  fromMe    Boolean
+  type      String   @default("text") // text|image|video|document|audio|location|poll|sticker
+  body      String   @default("")     // add @db.Text if you're on MySQL
+  fileName  String?
+  status    String   @default("sent") // sent|delivered|read
+  isRead    Boolean  @default(false)
+  timestamp DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([adminId, waId])
+  @@index([adminId, phoneKey, timestamp])
 }
 
 model Campaign {

@@ -64,14 +64,13 @@ export const initSocket = async (server) => {
     // ─── WHATSAPP VIEWER TRACKING (per admin) ───
     const waRoom = `whatsapp_qr_viewers:${adminId}`;
 
-    socket.on("whatsapp:start_viewing", () => {
+    socket.on("whatsapp:start_viewing", (ack) => {
       console.log("🔎 whatsapp:start_viewing", { adminId });
       if (!adminId) return;
       socket.join(waRoom);
 
       // initWhatsApp() is safe to call repeatedly (it returns early if an engine
-      // already exists or is starting), so we no longer depend on viewerCount === 1,
-      // which could be wrong when an old tab/socket of the same admin was still around.
+      // already exists or is starting).
       const state = getWhatsAppConnectionState(adminId);
       console.log("🚦 WhatsApp state at start_viewing:", { adminId, status: state.status });
       if (state.status === 'loading') {
@@ -79,6 +78,9 @@ export const initSocket = async (server) => {
           console.error(`❌ [${adminId}] initWhatsApp failed:`, err.message)
         );
       }
+
+      // NEW: reply with the current status if the client asked for it
+      if (typeof ack === "function") ack({ status: state.status });
     });
 
     socket.on("whatsapp:stop_viewing", () => {

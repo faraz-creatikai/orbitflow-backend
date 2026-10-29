@@ -5,6 +5,7 @@ import { getSocket } from '../socket/socket.js';
 import fs from 'fs/promises';
 import path from 'path';
 import pino from 'pino';
+import { updateWhatsAppStatus } from '../controllers/controller.whatsappInbox.js';
 
 // Verified against Baileys' source (src/Socket/socket.ts, the `genPairQR` loop
 // that fires on the `pair-device` stanza):
@@ -294,6 +295,18 @@ export const initWhatsApp = async (adminId, options = {}) => {
         emitToAdmin(adminId, 'whatsapp:status', { status: 'connected', user: s.connectedUserMeta });
       }
     }
+  });
+
+    sock.ev.on('messages.upsert', ({ messages }) => {
+    if (myGeneration !== s.socketGeneration) return;
+    for (const m of messages) {
+      saveWhatsAppMessage(adminId, m, emitToAdmin).catch((e) => console.error('save msg:', e.message));
+    }
+  });
+
+  sock.ev.on('messages.update', (updates) => {
+    if (myGeneration !== s.socketGeneration) return;
+    updateWhatsAppStatus(adminId, updates, emitToAdmin).catch(() => {});
   });
 
   s.currentSocket = sock;

@@ -121,7 +121,7 @@ export const initWhatsApp = async (adminId, options = {}) => {
     browser: method === 'pairing' ? Browsers.macOS('Safari') : ['Property CRM', 'Chrome', '1.0.0'],
     defaultQueryTimeoutMs: undefined,
     // NOTE: deliberately NOT setting qrTimeout — see the constants at the top.
-    logger: pino({ level: 'silent' })
+    logger: pino({ level: 'warn' })
   });
 
   let pairingRequestSent = false;

@@ -140,9 +140,6 @@ const applyStatus = async (adminId, waId, status, emit) => {
 
 
 
-
-
-
 //controllers
 
 export const getStoredMessage = async (adminId, key) => {
@@ -310,6 +307,20 @@ export const markChatRead = async (req, res, next) => {
             data: { isRead: true },
         });
         res.json({ success: true });
+    } catch (err) {
+        next(new ApiError(500, err.message));
+    }
+};
+
+
+
+// DELETE /whatsapp/inbox/chat/:phoneKey → deletes this admin's saved history with one customer
+export const deleteChat = async (req, res, next) => {
+    try {
+        const { count } = await prisma.whatsAppMessage.deleteMany({
+            where: { adminId: req.admin.id, phoneKey: keyOf(req.params.phoneKey) },
+        });
+        res.json({ success: true, deleted: count });
     } catch (err) {
         next(new ApiError(500, err.message));
     }

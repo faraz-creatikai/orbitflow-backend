@@ -86,6 +86,7 @@ model Admin {
 
   linkedinAccount LinkedinAccount?
   whatsappMessages WhatsAppMessage[]
+  whatsappMetaConfig WhatsAppMetaConfig?
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -146,6 +147,24 @@ model CallingAgentConfig {
   @@index([isActive]) // Optimizes the database query when searching for the active agent
 }
 
+model WhatsAppMetaConfig {
+  id              String   @id @default(uuid())
+  adminId         String   @unique
+  admin           Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  
+  // Meta Cloud API Credentials
+  wabaId          String?  // WhatsApp Business Account ID
+  phoneNumberId   String?  // Phone Number ID from Meta dashboard
+  accessToken     String?  @db.Text // System User or Permanent Access Token
+  displayPhone    String?  // The registered phone number (e.g., "919876543210")
+  
+  // Admin's selected default provider
+  activeProvider  String   @default("baileys") // "baileys" | "meta"
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model WhatsAppMessage {
   id        String   @id @default(uuid())
   adminId   String
@@ -158,6 +177,8 @@ model WhatsAppMessage {
   fileName  String?
   status    String   @default("sent") // sent|delivered|read
   isRead    Boolean  @default(false)
+
+  source      String   @default("baileys")
 
   mediaUrl    String?
   lat         Float?

@@ -1,7 +1,8 @@
 import express from "express";
 import { protectRoute } from "../middlewares/auth.js";
-import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, receiveWhatsAppMessage, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost, verifyWhatsAppWebhook } from "../controllers/controller.socialAuth.js";
+import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost} from "../controllers/controller.socialAuth.js";
 import upload from "../config/multer.js";
+import { connectMetaWhatsapp, receiveWhatsAppMessage, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
 
 const socialAuthRoutes = express.Router();
 
@@ -43,5 +44,8 @@ socialAuthRoutes.post("/schedule-facebook-post", upload.fields([
 socialAuthRoutes.post("/auto-social-agent", upload.fields([
     { name: "PostImage", maxCount: 5 },
 ]), runAutoSocialAgent);
+
+
+socialAuthRoutes.post("/connect-meta-whatsapp", connectMetaWhatsapp);
 
 export default socialAuthRoutes;

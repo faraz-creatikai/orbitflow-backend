@@ -6,6 +6,7 @@ import { makeCall } from "../config/exotel.js";
 import fs from "fs";
 import { EmailCampaignAgent } from "../ai/agent.js";
 import { toWaNumber } from "../utils/phone.js";
+import { getCustomerAccessFilter } from "./controller.customer.js";
 
 const prisma = new PrismaClient();
 
@@ -48,17 +49,29 @@ export function mergeAiContentIntoTemplate(templateHtml, aiBody, customer) {
 const fetchTargetCustomers = async ({
   customerIds = [],
   sendToAll = false,
+  admin,
 }) => {
+  // same rules as getCustomer: what this admin may see is what this admin may message
+  const access = await getCustomerAccessFilter(admin);
+
   if (sendToAll) {
-    return prisma.customer.findMany();
+    return prisma.customer.findMany({ where: access });
   }
   if (!Array.isArray(customerIds) || customerIds.length === 0) return [];
 
   return prisma.customer.findMany({
-    where: {
-      id: { in: customerIds },
-    },
+    where: { AND: [access, { id: { in: customerIds } }] },
   });
+};
+
+// Decide what a template really is, from its data instead of trusting whatsappMediaType
+const resolveMediaType = (t) => {
+  const mt = t.whatsappMediaType;
+  const hasFile = Array.isArray(t.whatsappImage) && t.whatsappImage.length > 0;
+  if (["image", "video", "document"].includes(mt) && hasFile) return mt;
+  if (t.whatsappPoll?.name) return "poll";
+  if (t.whatsappLocation?.lat != null && t.whatsappLocation?.lng != null) return "location";
+  return "text";
 };
 
 // ===================================================================
@@ -76,7 +89,7 @@ export const sendEmailByTemplate = async (req, res, next) => {
     if (template.type !== "email")
       return next(new ApiError(400, "Template type must be 'email'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -138,7 +151,7 @@ export const sendWhatsAppByTemplate = async (req, res, next) => {
     if (template.type !== "whatsapp")
       return next(new ApiError(400, "Template type must be 'whatsapp'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -215,7 +228,7 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
     if (template.type !== "whatsapp")
       return next(new ApiError(400, "Template type must be 'whatsapp'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -240,7 +253,7 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
 
 
         const extra = {
-          mediaType: template.whatsappMediaType || undefined,
+          mediaType: resolveMediaType(template),
           fileName: template.whatsappFileName || undefined,
           linkPreview: template.whatsappLinkPreview || undefined,
           location: template.whatsappLocation || undefined,
@@ -272,10 +285,14 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
       }
     }
 
+    const sent = results.filter((r) => r.status === "sent").length;
     res.status(200).json({
-      success: true,
-      sent: results.filter((r) => r.status === "sent").length,
+      success: sent > 0,
+      sent,
       results,
+      ...(sent === 0 && {
+        message: results.find((r) => r.status === "failed")?.error || "No customer had a valid phone number",
+      }),
     });
   } catch (err) {
     next(new ApiError(500, err.message));
@@ -367,7 +384,7 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
     }
 
     // 2. Resolve target customers
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll ,admin: req.admin});
     if (!customers.length) return next(new ApiError(404, "No destination customers found"));
 
     const results = [];
@@ -450,10 +467,14 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
       }
     }
 
-    return res.status(200).json({
-      success: true,
-      sent: results.filter((r) => r.status === "sent").length,
+    const sent = results.filter((r) => r.status === "sent").length;
+    res.status(200).json({
+      success: sent > 0,
+      sent,
       results,
+      ...(sent === 0 && {
+        message: results.find((r) => r.status === "failed")?.error || "No customer had a valid phone number",
+      }),
     });
   } catch (err) {
     next(new ApiError(500, err.message));
@@ -478,7 +499,7 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
       fileBuffer = fs.readFileSync(file.path);
     }
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll: sendToAll === "true" });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll: sendToAll === "true",admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -528,10 +549,14 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
       fs.unlinkSync(file.path);
     }
 
+    const sent = results.filter((r) => r.status === "sent").length;
     res.status(200).json({
-      success: true,
-      sent: results.filter((r) => r.status === "sent").length,
+      success: sent > 0,
+      sent,
       results,
+      ...(sent === 0 && {
+        message: results.find((r) => r.status === "failed")?.error || "No customer had a valid phone number",
+      }),
     });
   } catch (err) {
     next(new ApiError(500, err.message));
@@ -750,7 +775,7 @@ export const sendEmailDirectToCustomers = async (req, res, next) => {
       return next(new ApiError(400, "Either userPrompt or Subject & Body is required"));
     }
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];

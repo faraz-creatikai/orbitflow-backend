@@ -391,6 +391,15 @@ export const getWhatsAppConnectionState = (adminId) => {
 
 export const getWhatsAppSocket = (adminId) => sessions.get(adminId)?.currentSocket ?? null;
 
+export const hasLinkedSession = async (adminId) => {
+  try {
+    const raw = await fs.readFile(path.join(getAuthDir(adminId), 'creds.json'), 'utf8');
+    return !!JSON.parse(raw).me; // `me` only exists after a successful pair
+  } catch {
+    return false;
+  }
+};
+
 export const logoutWhatsApp = async (adminId) => {
   const s = sessions.get(adminId);
   if (!s || !s.currentSocket) {

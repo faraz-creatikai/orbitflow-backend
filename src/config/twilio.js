@@ -1,6 +1,6 @@
 import twilio from "twilio";
 import dotenv from "dotenv";
-import { getWhatsAppConnectionState, getWhatsAppSocket, initWhatsApp } from "./baileys.js";
+import { getWhatsAppConnectionState, getWhatsAppSocket, hasLinkedSession, initWhatsApp } from "./baileys.js";
 
 dotenv.config();
 
@@ -62,21 +62,23 @@ export const sendBaileysWhatsApp = async (adminId, to, message, imageUrl = null,
     let sock = getWhatsAppSocket(adminId);
 
     // 1. Wake up engine if asleep
-    if (!sock) {
-      console.log("🚦 Engine is asleep. Waking up WhatsApp to send message...");
-      initWhatsApp(adminId);
+    if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
+  if (!sock) {
+    if (!(await hasLinkedSession(adminId))) throw new Error("WhatsApp is not linked for this admin");
+    initWhatsApp(adminId).catch((e) => console.error(`[${adminId}] init failed:`, e.message));
+  }
 
-      let retries = 0;
-      while (getWhatsAppConnectionState(adminId).status !== 'connected' && retries < 15) {
-        await delay(1000);
-        retries++;
-      }
+  let retries = 0;
+  while (getWhatsAppConnectionState(adminId).status !== 'connected' && retries < 15) {
+    await delay(1000);
+    retries++;
+  }
 
-      sock = getWhatsAppSocket(adminId);
-      if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
-        throw new Error("WhatsApp socket failed to connect to Meta in time. Are you logged out?");
-      }
-    }
+  sock = getWhatsAppSocket(adminId);
+  if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
+    throw new Error("WhatsApp socket failed to connect. Is this admin's WhatsApp linked?");
+  }
+}
 
     const {
       mediaType = "text",
@@ -109,12 +111,12 @@ export const sendBaileysWhatsApp = async (adminId, to, message, imageUrl = null,
       await delay(200);
 
       const isRecording = mediaType === "video";
-      await sock.sendPresenceUpdate(isRecording ? "recording" : "composing", jid);
+      await sock.sendPresenceUpdate(isRecording ? "recording" : "composing", jid).catch(() => { });;
 
       const artificialDelay = isFileMedia ? 800 : (1200 + Math.floor(Math.random() * 1000));
       await delay(artificialDelay);
 
-      await sock.sendPresenceUpdate("paused", jid);
+      await sock.sendPresenceUpdate("paused", jid).catch(() => { });
     }
 
     let content;
@@ -241,7 +243,10 @@ export const sendBaileysWhatsAppDirect = async (adminId, to, message, fileBuffer
     // 1. 🛑 FIX: Wait if socket is completely missing OR if it's currently reconnecting
     if (!sock || getWhatsAppConnectionState(adminId).status !== 'connected') {
       console.log("🚦 WhatsApp engine is reconnecting or asleep. Waiting...");
-      if (!sock) initWhatsApp(adminId);
+     if (!sock) {
+  if (!(await hasLinkedSession(adminId))) throw new Error("WhatsApp is not linked for this admin");
+  initWhatsApp(adminId).catch((e) => console.error(`[${adminId}] init failed:`, e.message));
+}
 
       let retries = 0;
       while (getWhatsAppConnectionState(adminId).status !== 'connected' && retries < 15) {

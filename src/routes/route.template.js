@@ -18,8 +18,8 @@ templateRoute.post(
   templateUpload.fields([{ name: "whatsappImage", maxCount: 5 }]), // 👈 changed from upload
   createTemplate
 );
-templateRoute.get("/", isAdministrator, getTemplates);
-templateRoute.get("/:id", isAdministrator, getTemplateById);
+templateRoute.get("/", getTemplates);
+templateRoute.get("/:id", getTemplateById);
 templateRoute.put(
   "/:id",
   templateUpload.fields([{ name: "whatsappImage", maxCount: 5 }]), // 👈 changed from upload

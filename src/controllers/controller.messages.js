@@ -5,6 +5,7 @@ import ApiError from "../utils/ApiError.js";
 import { makeCall } from "../config/exotel.js";
 import fs from "fs";
 import { EmailCampaignAgent } from "../ai/agent.js";
+import { toWaNumber } from "../utils/phone.js";
 
 const prisma = new PrismaClient();
 
@@ -232,14 +233,7 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
           continue;
         }
 
-        // Format for Baileys: Must not contain '+'
-        let cleanPhone = phone.replace("+", "");
-
-        // If it's just a 10 digit number, prepend the country code (without +)
-        const defaultCode = (process.env.DEFAULT_COUNTRY_CODE || "91").replace("+", "");
-        const formattedPhone = cleanPhone.length === 10
-          ? `${defaultCode}${cleanPhone}`
-          : cleanPhone;
+        const formattedPhone = toWaNumber(phone);
 
         const message = replacePlaceholders(template.body, c);
         const imageUrl = template.whatsappImage?.[0] || null;
@@ -272,12 +266,9 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
         }
 
       } catch (err) {
-        results.push({
-          id: c.id,
-          name: c.customerName,
-          status: "failed",
-          error: err.message,
-        });
+        results.push({ id: c.id, name: c.customerName, status: "failed", error: err.message });
+        // no point trying every other customer if the account isn't connected
+        if (/failed to (stabilize\/)?connect|not linked/i.test(err.message)) break;
       }
     }
 
@@ -396,11 +387,7 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
         }
 
         // Format for Baileys compatibility
-        let cleanPhone = phone.replace("+", "");
-        const defaultCode = (process.env.DEFAULT_COUNTRY_CODE || "91").replace("+", "");
-        const formattedPhone = cleanPhone.length === 10
-          ? `${defaultCode}${cleanPhone}`
-          : cleanPhone;
+        const formattedPhone = toWaNumber(phone);
 
         // Loop through each property in the payload list separately
         for (let j = 0; j < properties.length; j++) {
@@ -457,12 +444,9 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
         }
 
       } catch (err) {
-        results.push({
-          id: c.id,
-          name: c.customerName,
-          status: "failed",
-          error: err.message,
-        });
+        results.push({ id: c.id, name: c.customerName, status: "failed", error: err.message });
+        // no point trying every other customer if the account isn't connected
+        if (/failed to (stabilize\/)?connect|not linked/i.test(err.message)) break;
       }
     }
 
@@ -508,10 +492,7 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
           continue;
         }
 
-        let cleanPhone = phone.replace("+", "");
-        const defaultCode = (process.env.DEFAULT_COUNTRY_CODE || "91").replace("+", "");
-        const formattedPhone = cleanPhone.length === 10 ? `${defaultCode}${cleanPhone}` : cleanPhone;
-
+        const formattedPhone = toWaNumber(phone);
         const extra = {
           mediaType,
           location,
@@ -538,6 +519,7 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
 
       } catch (err) {
         results.push({ id: c.id, status: "failed", error: err.message });
+        if (/failed to (stabilize\/)?connect|not linked/i.test(err.message)) break;
       }
     }
 

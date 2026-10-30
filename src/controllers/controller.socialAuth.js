@@ -386,13 +386,13 @@ export const getInstagramLivePosts = async (req, res) => {
 
         // CHECK CACHE (5 min)
         const cached = postCache.get(cacheKey);
-       /*  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-            return res.json({
-                success: true,
-                posts: cached.data,
-                cached: true
-            });
-        } */
+        /*  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+             return res.json({
+                 success: true,
+                 posts: cached.data,
+                 cached: true
+             });
+         } */
 
         // 1. Get connected account
         const account = await prisma.socialAccount.findFirst({
@@ -1211,24 +1211,24 @@ export const runAutoSocialAgent = async (req, res) => {
         }
 
         //2. Else → fallback to AI image generation
-else {
-    const imageBuffer = await generateWithHuggingFace(aiPost.imagePrompt);
+        else {
+            const imageBuffer = await generateWithHuggingFace(aiPost.imagePrompt);
 
-    const folder = platform === "FACEBOOK"
-        ? "facebook/facebook_images"
-        : "instagram/instagram_images";
+            const folder = platform === "FACEBOOK"
+                ? "facebook/facebook_images"
+                : "instagram/instagram_images";
 
-    // upload_stream because we have a Buffer, not a file path or URL
-    imageUrl = await new Promise((resolve, reject) => {
-        cloudinary.uploader.upload_stream(
-            { folder, transformation: [{ width: 1000, crop: "limit" }] },
-            (error, result) => {
-                if (error) return reject(error);
-                resolve(result.secure_url);
-            }
-        ).end(imageBuffer); // .end() pushes the Buffer into the stream
-    });
-}
+            // upload_stream because we have a Buffer, not a file path or URL
+            imageUrl = await new Promise((resolve, reject) => {
+                cloudinary.uploader.upload_stream(
+                    { folder, transformation: [{ width: 1000, crop: "limit" }] },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result.secure_url);
+                    }
+                ).end(imageBuffer); // .end() pushes the Buffer into the stream
+            });
+        }
 
 
 
@@ -1351,3 +1351,45 @@ else {
 
 
 
+
+
+
+
+
+
+
+
+// GET method to verify the webhook
+export const verifyWhatsAppWebhook = (req, res) => {
+  // Use a secure string here or load it from your .env file
+  const verify_token = "my_secure_verify_token_123";
+
+  // Parse parameters from the webhook verification request
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  // Check if a token and mode were sent
+  if (mode && token) {
+    if (mode === "subscribe" && token === verify_token) {
+      console.log("WhatsApp Webhook Verified successfully!");
+      // Respond with 200 OK and challenge token from the request
+      return res.status(200).send(challenge);
+    } else {
+      // Responds with '403 Forbidden' if verify tokens do not match
+      return res.sendStatus(403);
+    }
+  } else {
+    return res.sendStatus(400);
+  }
+};
+
+// POST method to receive messages and status updates
+export const receiveWhatsAppMessage = (req, res) => {
+  // Log the incoming webhook payload to see what Meta sends
+  console.log("Incoming WhatsApp Webhook payload:", JSON.stringify(req.body, null, 2));
+
+  // You must always return a 200 OK to acknowledge receipt.
+  // If you don't, Meta will assume the delivery failed and will keep retrying.
+  return res.sendStatus(200);
+};

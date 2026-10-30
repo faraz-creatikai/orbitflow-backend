@@ -1,9 +1,13 @@
 import express from "express";
 import { protectRoute } from "../middlewares/auth.js";
-import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost } from "../controllers/controller.socialAuth.js";
+import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, receiveWhatsAppMessage, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost, verifyWhatsAppWebhook } from "../controllers/controller.socialAuth.js";
 import upload from "../config/multer.js";
 
 const socialAuthRoutes = express.Router();
+
+
+socialAuthRoutes.get("/whatsapp-webhook", verifyWhatsAppWebhook);
+socialAuthRoutes.post("/whatsapp-webhook", receiveWhatsAppMessage);
 
 socialAuthRoutes.use(protectRoute);
 

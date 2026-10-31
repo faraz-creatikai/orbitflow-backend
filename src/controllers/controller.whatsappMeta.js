@@ -541,15 +541,13 @@ export const verifyMetaTemplate = async (req, res, next) => {
 
             const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             
-            // 1. Sanitize Variables: Convert {{Name}} or {{anything}} to {{1}}, {{2}}
+            // 1. Sanitize Variables: Convert {{Name}} to {{1}}
             let metaBodyText = crmTemplate.body;
             let exampleData = [];
             
-            // Match anything inside double curly braces
             const varMatches = metaBodyText.match(/\{\{(.+?)\}\}/g);
             if (varMatches) {
                 varMatches.forEach((match, index) => {
-                    // Replace {{Name}} with {{1}}, {{2}}, etc.
                     metaBodyText = metaBodyText.replace(match, `{{${index + 1}}}`);
                     exampleData.push("Example" + (index + 1));
                 });
@@ -560,16 +558,16 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 text: metaBodyText 
             }];
 
-            // Meta requires an array inside an array for body_text examples
             if (exampleData.length > 0) {
                 components[0].example = { body_text: [exampleData] };
             }
 
-            // 2. Handle Media Headers (Images/Documents)
+            // 2. Media Headers
             if (crmTemplate.whatsappMediaType === "image") {
                 components.push({
                     type: "HEADER",
                     format: "IMAGE",
+                    // NOTE: Meta might reject this public URL and demand a "header_handle" instead
                     example: { header_url: ["https://www.facebook.com/images/fb_icon_325x325.png"] } 
                 });
             } else if (crmTemplate.whatsappMediaType === "document") {
@@ -581,6 +579,13 @@ export const verifyMetaTemplate = async (req, res, next) => {
             }
 
             // 3. Send to Meta
+            const payload = {
+                name: metaName,
+                category: "MARKETING",
+                language: "en_US",
+                components
+            };
+
             const metaRes = await fetch(
                 `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates`,
                 {
@@ -589,23 +594,36 @@ export const verifyMetaTemplate = async (req, res, next) => {
                         "Authorization": `Bearer ${config.accessToken}`,
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({
-                        name: metaName,
-                        category: "MARKETING",
-                        language: "en_US",
-                        components
-                    })
+                    body: JSON.stringify(payload)
                 }
             );
 
             const data = await metaRes.json();
             
-            results.push({ 
-                id, 
-                name: crmTemplate.name, 
-                success: !data.error, 
-                error: data.error?.message || null 
-            });
+            // 🛑 DEEP ERROR LOGGING
+            if (data.error) {
+                console.error(`\n❌ [META REJECTION] Template: ${crmTemplate.name}`);
+                console.error(JSON.stringify(data.error, null, 2)); // Dump entire error object to terminal
+
+                // Build a detailed error string for the frontend UI
+                let deepError = data.error.message;
+                if (data.error.error_user_msg) deepError += ` - ${data.error.error_user_msg}`;
+                if (data.error.error_data && data.error.error_data.details) deepError += ` (Details: ${data.error.error_data.details})`;
+
+                results.push({ 
+                    id, 
+                    name: crmTemplate.name, 
+                    success: false, 
+                    error: deepError 
+                });
+            } else {
+                results.push({ 
+                    id, 
+                    name: crmTemplate.name, 
+                    success: true, 
+                    error: null 
+                });
+            }
         }
 
         res.status(200).json({ 

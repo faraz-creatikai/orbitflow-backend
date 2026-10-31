@@ -513,6 +513,7 @@ export const getMetaTemplates = async (req, res, next) => {
 };
 
 
+
 // ==========================================
 // 12. SUBMIT CRM TEMPLATES TO META (POST) - BULK CAPABLE
 // ==========================================
@@ -521,7 +522,6 @@ export const verifyMetaTemplate = async (req, res, next) => {
         const adminId = req.admin.id;
         const { templateId, templateIds } = req.body;
 
-        // Support both single ID and Bulk Array of IDs
         const idsToVerify = templateIds || (templateId ? [templateId] : []);
 
         if (idsToVerify.length === 0) {
@@ -535,19 +535,34 @@ export const verifyMetaTemplate = async (req, res, next) => {
 
         const results = [];
 
-        // Process bulk array
         for (const id of idsToVerify) {
             const crmTemplate = await prisma.template.findUnique({ where: { id } });
             if (!crmTemplate) continue;
 
             const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-            const components = [{ type: "BODY", text: crmTemplate.body }];
-
-            // 1. Handle Dynamic Variables (Meta requires body_text examples for {{1}}, {{2}})
-            const varMatches = crmTemplate.body.match(/\{\{\d+\}\}/g);
+            
+            // 1. Sanitize Variables: Convert {{Name}} or {{anything}} to {{1}}, {{2}}
+            let metaBodyText = crmTemplate.body;
+            let exampleData = [];
+            
+            // Match anything inside double curly braces
+            const varMatches = metaBodyText.match(/\{\{(.+?)\}\}/g);
             if (varMatches) {
-                // Meta strictly expects an array wrapping an array of variable examples
-                components[0].example = { body_text: [Array(varMatches.length).fill("ExampleData")] };
+                varMatches.forEach((match, index) => {
+                    // Replace {{Name}} with {{1}}, {{2}}, etc.
+                    metaBodyText = metaBodyText.replace(match, `{{${index + 1}}}`);
+                    exampleData.push("Example" + (index + 1));
+                });
+            }
+
+            const components = [{ 
+                type: "BODY", 
+                text: metaBodyText 
+            }];
+
+            // Meta requires an array inside an array for body_text examples
+            if (exampleData.length > 0) {
+                components[0].example = { body_text: [exampleData] };
             }
 
             // 2. Handle Media Headers (Images/Documents)
@@ -555,7 +570,6 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 components.push({
                     type: "HEADER",
                     format: "IMAGE",
-                    // Meta requires a dummy public URL for validation purposes
                     example: { header_url: ["https://www.facebook.com/images/fb_icon_325x325.png"] } 
                 });
             } else if (crmTemplate.whatsappMediaType === "document") {
@@ -586,7 +600,6 @@ export const verifyMetaTemplate = async (req, res, next) => {
 
             const data = await metaRes.json();
             
-            // Record result of this specific template
             results.push({ 
                 id, 
                 name: crmTemplate.name, 

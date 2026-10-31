@@ -15,19 +15,18 @@ const emitToAdmin = (adminId, event, payload) => {
 export const connectMetaWhatsapp = async (req, res, next) => {
     try {
         const { code, waba_id, phone_number_id } = req.body;
-        const adminId = req.admin.id; // From protectRoute middleware
+        const adminId = req.admin.id; 
 
-        if (!code || !waba_id || !phone_number_id) {
-            return next(new ApiError(400, "Missing required Meta OAuth parameters: code, waba_id, or phone_number_id"));
+        // 🛑 FIX 1: Relaxed validation. Meta sometimes omits phone_number_id during the coexistence flow.
+        if (!code || !waba_id) {
+            return next(new ApiError(400, "Missing required Meta OAuth parameters: code or waba_id"));
         }
 
         console.log(`🔄 [${adminId}] Exchanging WhatsApp OAuth code for token...`);
 
-        // 1. Exchange the OAuth code for a short-lived Access Token
-        // NOTE: redirect_uri must exactly match the URL where the frontend popup was triggered, 
-        // or be omitted depending on your FB SDK setup. Usually, the page URL works.
+        // 🛑 FIX 2: Added `&redirect_uri=` at the end. Meta rejects JS SDK codes without this empty parameter.
         const tokenRes = await fetch(
-            `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${process.env.FB_APP_ID}&client_secret=${process.env.FB_APP_SECRET}&code=${code}`
+            `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${process.env.FB_APP_ID}&client_secret=${process.env.FB_APP_SECRET}&code=${code}&redirect_uri=`
         );
         const tokenData = await tokenRes.json();
 
@@ -36,7 +35,6 @@ export const connectMetaWhatsapp = async (req, res, next) => {
             return next(new ApiError(400, "Failed to exchange OAuth code for access token"));
         }
 
-        // 2. Exchange short-lived token for a long-lived token (60 days)
         const longRes = await fetch(
             `https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${process.env.FB_APP_ID}&client_secret=${process.env.FB_APP_SECRET}&fb_exchange_token=${tokenData.access_token}`
         );
@@ -50,19 +48,18 @@ export const connectMetaWhatsapp = async (req, res, next) => {
         const accessToken = longData.access_token;
         console.log(`✅ [${adminId}] Long-lived WhatsApp Token received`);
 
-        // 3. Save Configuration to DB
         const config = await prisma.whatsAppMetaConfig.upsert({
             where: { adminId },
             update: {
                 wabaId: waba_id,
-                phoneNumberId: phone_number_id,
+                phoneNumberId: phone_number_id || null, // Allow null if Meta omitted it
                 accessToken: accessToken,
-                activeProvider: "meta" // Switch default sender to Meta
+                activeProvider: "meta"
             },
             create: {
                 adminId,
                 wabaId: waba_id,
-                phoneNumberId: phone_number_id,
+                phoneNumberId: phone_number_id || null,
                 accessToken: accessToken,
                 activeProvider: "meta"
             }

@@ -528,21 +528,29 @@ const getFirstMediaUrl = (imageField) => {
 };
 
 // ==========================================
-// HELPER: Upload Media to Meta's Resumable API
+// HELPER: Upload Media to Meta using APP ACCESS TOKEN
 // ==========================================
-const uploadSampleToMeta = async (mediaUrl, accessToken) => {
+const uploadSampleToMeta = async (mediaUrl) => {
     try {
-        // 1. Fetch media from Cloudinary (or any public URL)
+        const appId = process.env.FB_APP_ID;
+        const appSecret = process.env.FB_APP_SECRET;
+        
+        // 🛑 FIX: Use the universal App Access Token for the App-level upload endpoint
+        const appAccessToken = `${appId}|${appSecret}`;
+
+        // 1. Fetch media from Cloudinary
         const imgRes = await fetch(mediaUrl);
         const buffer = await imgRes.arrayBuffer();
         const fileLength = buffer.byteLength;
-        const fileType = imgRes.headers.get("content-type") || "image/jpeg";
+        const fileType = imgRes.headers.get("content-type") || "image/png";
 
-        // 2. Create Upload Session with Meta
-        const appId = process.env.FB_APP_ID;
+        // 2. Create Upload Session
         const sessionRes = await fetch(
-            `https://graph.facebook.com/v21.0/${appId}/uploads?file_length=${fileLength}&file_type=${fileType}&access_token=${accessToken}`,
-            { method: 'POST' }
+            `https://graph.facebook.com/v21.0/${appId}/uploads?file_length=${fileLength}&file_type=${fileType}`,
+            { 
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${appAccessToken}` }
+            }
         );
         const sessionData = await sessionRes.json();
         
@@ -551,13 +559,13 @@ const uploadSampleToMeta = async (mediaUrl, accessToken) => {
             return null;
         }
 
-        // 3. Upload the actual file bytes to the Session ID
+        // 3. Upload the actual file bytes
         const uploadRes = await fetch(
             `https://graph.facebook.com/v21.0/${sessionData.id}`,
             {
                 method: 'POST',
                 headers: {
-                    'Authorization': `OAuth ${accessToken}`,
+                    'Authorization': `OAuth ${appAccessToken}`,
                     'file_offset': '0'
                 },
                 body: buffer
@@ -599,7 +607,7 @@ export const verifyMetaTemplate = async (req, res, next) => {
 
             const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
             
-            // 1. Sanitize Variables: Convert {{Name}} to {{1}}
+            // 1. Sanitize Variables
             let metaBodyText = crmTemplate.body;
             let exampleData = [];
             
@@ -620,11 +628,12 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 components[0].example = { body_text: [exampleData] };
             }
 
-            // 2. Handle Media Headers (Images/Documents) safely using the Upload API
+            // 2. Handle Media Headers safely using the App Access Token Upload helper
             const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
 
             if (crmTemplate.whatsappMediaType === "image" && mediaUrl) {
-                const handle = await uploadSampleToMeta(mediaUrl, config.accessToken);
+                // 🛑 FIX: Call helper without passing the client token
+                const handle = await uploadSampleToMeta(mediaUrl);
                 if (handle) {
                     components.push({
                         type: "HEADER",
@@ -633,10 +642,10 @@ export const verifyMetaTemplate = async (req, res, next) => {
                     });
                 } else {
                     results.push({ id, name: crmTemplate.name, success: false, error: "Failed to upload image sample to Meta." });
-                    continue; // Skip submitting this template to Meta
+                    continue; 
                 }
             } else if (crmTemplate.whatsappMediaType === "document" && mediaUrl) {
-                const handle = await uploadSampleToMeta(mediaUrl, config.accessToken);
+                const handle = await uploadSampleToMeta(mediaUrl);
                 if (handle) {
                     components.push({
                         type: "HEADER",
@@ -649,7 +658,7 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 }
             }
 
-            // 3. Send Payload to Meta
+            // 3. Send Payload to Meta (using the client's token for template creation)
             const payload = {
                 name: metaName,
                 category: "MARKETING",

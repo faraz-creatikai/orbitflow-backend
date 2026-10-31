@@ -239,5 +239,25 @@ export const receiveWhatsAppMessage = async (req, res) => {
 };
 
 
+// ==========================================
+// 4. CHECK CONNECTION STATUS (GET)
+// ==========================================
+export const checkWhatsAppConnection = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id; // Assuming auth middleware sets this
+        
+        const config = await prisma.whatsAppMetaConfig.findUnique({
+            where: { adminId }
+        });
 
+        if (config && config.activeProvider === "meta") {
+            return res.status(200).json({ connected: true, config });
+        }
+        
+        return res.status(200).json({ connected: false });
+    } catch (err) {
+        console.error("❌ Check Connection Error:", err.message);
+        next(new ApiError(500, "Failed to check WhatsApp connection status"));
+    }
+};
 

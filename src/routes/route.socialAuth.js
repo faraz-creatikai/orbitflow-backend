@@ -2,7 +2,7 @@ import express from "express";
 import { protectRoute } from "../middlewares/auth.js";
 import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost} from "../controllers/controller.socialAuth.js";
 import upload from "../config/multer.js";
-import { checkWhatsAppConnection, connectMetaWhatsapp, disconnectMetaWhatsapp, getMetaChatHistory, getMetaInboxSummary, markMetaChatRead, receiveWhatsAppMessage, sendMetaWhatsAppMessage, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
+import { checkWhatsAppConnection, connectMetaWhatsapp, disconnectMetaWhatsapp, getMetaChatHistory, getMetaInboxSummary, getMetaTemplates, markMetaChatRead, receiveWhatsAppMessage, sendMetaWhatsAppMessage, verifyMetaTemplate, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
 
 const socialAuthRoutes = express.Router();
 
@@ -54,5 +54,10 @@ socialAuthRoutes.post("/send-meta-message", sendMetaWhatsAppMessage);
 socialAuthRoutes.get("/meta-inbox/summary", getMetaInboxSummary);
 socialAuthRoutes.get("/meta-inbox/chat/:phoneKey", getMetaChatHistory);
 socialAuthRoutes.post("/meta-inbox/chat/:phoneKey/read", markMetaChatRead);
+
+//template of meta whastapp
+socialAuthRoutes.get("/meta-templates",getMetaTemplates);
+socialAuthRoutes.post("/verify-meta-template",verifyMetaTemplate);
+
 
 export default socialAuthRoutes;

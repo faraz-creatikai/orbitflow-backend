@@ -15,7 +15,7 @@ const emitToAdmin = (adminId, event, payload) => {
 export const connectMetaWhatsapp = async (req, res, next) => {
     try {
         const { code, waba_id, phone_number_id } = req.body;
-        const adminId = req.admin.id; 
+        const adminId = req.admin.id;
 
         // 🛑 FIX 1: Relaxed validation. Meta sometimes omits phone_number_id during the coexistence flow.
         if (!code || !waba_id) {
@@ -104,27 +104,27 @@ export const connectMetaWhatsapp = async (req, res, next) => {
 
 // GET method to verify the webhook
 export const verifyWhatsAppWebhook = (req, res) => {
-  // Use a secure string here or load it from your .env file
-  const verify_token = "my_secure_verify_token_123";
+    // Use a secure string here or load it from your .env file
+    const verify_token = "my_secure_verify_token_123";
 
-  // Parse parameters from the webhook verification request
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+    // Parse parameters from the webhook verification request
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
 
-  // Check if a token and mode were sent
-  if (mode && token) {
-    if (mode === "subscribe" && token === verify_token) {
-      console.log("WhatsApp Webhook Verified successfully!");
-      // Respond with 200 OK and challenge token from the request
-      return res.status(200).send(challenge);
+    // Check if a token and mode were sent
+    if (mode && token) {
+        if (mode === "subscribe" && token === verify_token) {
+            console.log("WhatsApp Webhook Verified successfully!");
+            // Respond with 200 OK and challenge token from the request
+            return res.status(200).send(challenge);
+        } else {
+            // Responds with '403 Forbidden' if verify tokens do not match
+            return res.sendStatus(403);
+        }
     } else {
-      // Responds with '403 Forbidden' if verify tokens do not match
-      return res.sendStatus(403);
+        return res.sendStatus(400);
     }
-  } else {
-    return res.sendStatus(400);
-  }
 };
 
 // ==========================================
@@ -146,7 +146,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
         if (!changes) return;
 
         const phoneNumberId = changes.metadata?.phone_number_id;
-        
+
         // Find which Admin owns this phone number
         const config = await prisma.whatsAppMetaConfig.findFirst({
             where: { phoneNumberId }
@@ -154,7 +154,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
         if (!config) {
             console.log(`⚠️ Received WhatsApp webhook for unknown Phone Number ID: ${phoneNumberId}`);
-            return; 
+            return;
         }
 
         const adminId = config.adminId;
@@ -188,7 +188,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
                 const fromPhone = msg.from; // e.g., "919876543210"
                 const phoneKey = fromPhone.slice(-10); // Extract last 10 digits to match your DB logic
                 const type = msg.type; // "text", "image", "document", etc.
-                
+
                 let messageBody = "";
                 let mediaUrl = null;
 
@@ -245,7 +245,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
 export const checkWhatsAppConnection = async (req, res, next) => {
     try {
         const adminId = req.admin.id;
-        
+
         const config = await prisma.whatsAppMetaConfig.findUnique({
             where: { adminId }
         });
@@ -271,8 +271,8 @@ export const checkWhatsAppConnection = async (req, res, next) => {
             // Extract profile picture safely (profileData.data[0] contains the profile object)
             const profilePictureUrl = profileData.data?.[0]?.profile_picture_url || null;
 
-            return res.status(200).json({ 
-                connected: true, 
+            return res.status(200).json({
+                connected: true,
                 config,
                 accountDetails: {
                     name: phoneData.verified_name || "WhatsApp Business Account",
@@ -282,7 +282,7 @@ export const checkWhatsAppConnection = async (req, res, next) => {
                 }
             });
         }
-        
+
         return res.status(200).json({ connected: false });
     } catch (err) {
         console.error("❌ Check Connection Error:", err.message);
@@ -327,7 +327,7 @@ export const disconnectMetaWhatsapp = async (req, res, next) => {
 export const sendMetaWhatsAppMessage = async (req, res, next) => {
     try {
         const adminId = req.admin.id;
-        const { toPhone, messageBody } = req.body; 
+        const { toPhone, messageBody } = req.body;
 
         // 1. Verify Meta config exists
         const config = await prisma.whatsAppMetaConfig.findUnique({
@@ -362,7 +362,7 @@ export const sendMetaWhatsAppMessage = async (req, res, next) => {
         );
 
         const metaData = await metaRes.json();
-        
+
         if (metaData.error) {
             console.error("Meta Send API Error:", metaData.error);
             return next(new ApiError(400, metaData.error.message || "Failed to send message via Meta"));
@@ -387,10 +387,10 @@ export const sendMetaWhatsAppMessage = async (req, res, next) => {
         // 5. Emit to Socket (keeps other admin tabs in sync)
         emitToAdmin(adminId, "whatsapp:message", savedMsg);
 
-        res.status(200).json({ 
-            success: true, 
-            message: "Message sent successfully", 
-            data: savedMsg 
+        res.status(200).json({
+            success: true,
+            message: "Message sent successfully",
+            data: savedMsg
         });
     } catch (error) {
         console.error("❌ Send Meta Message Error:", error.message);
@@ -478,5 +478,104 @@ export const markMetaChatRead = async (req, res, next) => {
     } catch (err) {
         console.error("❌ Mark Meta Chat Read Error:", err.message);
         next(new ApiError(500, "Failed to mark messages as read"));
+    }
+};
+
+
+
+// templates
+
+// ==========================================
+// 11. GET META TEMPLATES STATUS (GET)
+// ==========================================
+export const getMetaTemplates = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
+        
+        if (!config || config.activeProvider !== "meta" || !config.wabaId) {
+            return res.status(200).json({ success: true, metaTemplates: [] });
+        }
+
+        // Fetch all templates associated with this WhatsApp Business Account
+        const metaRes = await fetch(
+            `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates?access_token=${config.accessToken}`
+        );
+        const data = await metaRes.json();
+
+        if (data.error) throw new Error(data.error.message);
+
+        res.status(200).json({ success: true, metaTemplates: data.data || [] });
+    } catch (err) {
+        console.error("❌ Get Meta Templates Error:", err.message);
+        next(new ApiError(500, "Failed to fetch templates from Meta"));
+    }
+};
+
+// ==========================================
+// 12. SUBMIT CRM TEMPLATE TO META (POST)
+// ==========================================
+export const verifyMetaTemplate = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const { templateId } = req.body;
+
+        const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
+        const crmTemplate = await prisma.template.findUnique({ where: { id: templateId } });
+
+        if (!crmTemplate) return next(new ApiError(404, "CRM Template not found"));
+        
+        // Meta strictly requires template names to be lowercase alphanumeric with underscores
+        const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+        // Construct the Meta Template Payload
+        const payload = {
+            name: metaName,
+            category: "MARKETING", // Default category; can be mapped if your CRM uses specific Meta categories
+            language: "en_US", 
+            components: [
+                {
+                    type: "BODY",
+                    text: crmTemplate.body
+                }
+            ]
+        };
+
+        // If your CRM template body contains variables like {{1}}, Meta REQUIRES example values
+        const hasVariables = /\{\{\d+\}\}/.test(crmTemplate.body);
+        if (hasVariables) {
+            const varCount = (crmTemplate.body.match(/\{\{\d+\}\}/g) || []).length;
+            payload.components[0].example = {
+                body_text: Array(varCount).fill("ExampleData")
+            };
+        }
+
+        const metaRes = await fetch(
+            `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates`,
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${config.accessToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            }
+        );
+
+        const data = await metaRes.json();
+
+        if (data.error) {
+            console.error("Meta Verification Rejection:", data.error);
+            return next(new ApiError(400, data.error.message || "Meta rejected the template format"));
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: "Template submitted to Meta successfully! It is now Pending Review.",
+            metaName 
+        });
+    } catch (err) {
+        console.error("❌ Verify Template Error:", err.message);
+        next(new ApiError(500, "Internal server error while submitting template"));
     }
 };

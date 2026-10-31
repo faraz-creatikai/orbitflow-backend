@@ -397,3 +397,86 @@ export const sendMetaWhatsAppMessage = async (req, res, next) => {
         next(new ApiError(500, "Internal server error while sending WhatsApp message"));
     }
 };
+
+
+
+
+// ==========================================
+// 7. GET META INBOX SUMMARY (GET)
+// ==========================================
+export const getMetaInboxSummary = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+
+        // Fetch all Meta messages for this admin, ordered by newest first
+        const messages = await prisma.whatsAppMessage.findMany({
+            where: { adminId, source: "meta" },
+            orderBy: { timestamp: "desc" }
+        });
+
+        // Group by phoneKey to get the latest message and unread count per contact
+        const chatMap = new Map();
+
+        for (const msg of messages) {
+            if (!chatMap.has(msg.phoneKey)) {
+                chatMap.set(msg.phoneKey, {
+                    phoneKey: msg.phoneKey,
+                    body: msg.body,
+                    type: msg.type,
+                    fromMe: msg.fromMe,
+                    timestamp: msg.timestamp,
+                    unread: 0
+                });
+            }
+            // Increment unread count if it's an incoming, unread message
+            if (!msg.fromMe && !msg.isRead) {
+                chatMap.get(msg.phoneKey).unread += 1;
+            }
+        }
+
+        res.status(200).json({ success: true, chats: Array.from(chatMap.values()) });
+    } catch (err) {
+        console.error("❌ Get Meta Inbox Summary Error:", err.message);
+        next(new ApiError(500, "Failed to load inbox summary"));
+    }
+};
+
+// ==========================================
+// 8. GET META CHAT HISTORY (GET)
+// ==========================================
+export const getMetaChatHistory = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const { phoneKey } = req.params;
+
+        const messages = await prisma.whatsAppMessage.findMany({
+            where: { adminId, phoneKey, source: "meta" },
+            orderBy: { timestamp: "asc" }
+        });
+
+        res.status(200).json({ success: true, messages });
+    } catch (err) {
+        console.error("❌ Get Meta Chat History Error:", err.message);
+        next(new ApiError(500, "Failed to load chat history"));
+    }
+};
+
+// ==========================================
+// 9. MARK META CHAT AS READ (POST)
+// ==========================================
+export const markMetaChatRead = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const { phoneKey } = req.params;
+
+        await prisma.whatsAppMessage.updateMany({
+            where: { adminId, phoneKey, source: "meta", fromMe: false, isRead: false },
+            data: { isRead: true }
+        });
+
+        res.status(200).json({ success: true });
+    } catch (err) {
+        console.error("❌ Mark Meta Chat Read Error:", err.message);
+        next(new ApiError(500, "Failed to mark messages as read"));
+    }
+};

@@ -2,7 +2,7 @@ import express from "express";
 import { protectRoute } from "../middlewares/auth.js";
 import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost} from "../controllers/controller.socialAuth.js";
 import upload from "../config/multer.js";
-import { checkWhatsAppConnection, connectMetaWhatsapp, disconnectMetaWhatsapp, receiveWhatsAppMessage, sendMetaWhatsAppMessage, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
+import { checkWhatsAppConnection, connectMetaWhatsapp, disconnectMetaWhatsapp, getMetaChatHistory, getMetaInboxSummary, markMetaChatRead, receiveWhatsAppMessage, sendMetaWhatsAppMessage, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
 
 const socialAuthRoutes = express.Router();
 
@@ -50,5 +50,9 @@ socialAuthRoutes.post("/connect-meta-whatsapp", connectMetaWhatsapp);
 socialAuthRoutes.delete('/disconnect-meta-whatsapp', disconnectMetaWhatsapp)
 socialAuthRoutes.get('/check-meta-whatsapp', checkWhatsAppConnection);
 socialAuthRoutes.post("/send-meta-message", sendMetaWhatsAppMessage);
+
+socialAuthRoutes.get("/meta-inbox/summary", getMetaInboxSummary);
+socialAuthRoutes.get("/meta-inbox/chat/:phoneKey", getMetaChatHistory);
+socialAuthRoutes.post("/meta-inbox/chat/:phoneKey/read", markMetaChatRead);
 
 export default socialAuthRoutes;

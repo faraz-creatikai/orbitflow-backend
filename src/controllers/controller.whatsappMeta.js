@@ -289,3 +289,32 @@ export const checkWhatsAppConnection = async (req, res, next) => {
         next(new ApiError(500, "Failed to check WhatsApp connection status"));
     }
 };
+
+
+// ==========================================
+// 5. DISCONNECT WHATSAPP (DELETE)
+// ==========================================
+export const disconnectMetaWhatsapp = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+
+        // Check if config exists before deleting to avoid Prisma throw
+        const existingConfig = await prisma.whatsAppMetaConfig.findUnique({
+            where: { adminId }
+        });
+
+        if (!existingConfig) {
+            return res.status(404).json({ success: false, message: "No WhatsApp connection found." });
+        }
+
+        await prisma.whatsAppMetaConfig.delete({
+            where: { adminId }
+        });
+
+        console.log(`🔌 [${adminId}] WhatsApp configuration deleted.`);
+        res.status(200).json({ success: true, message: "WhatsApp disconnected successfully." });
+    } catch (err) {
+        console.error("❌ Disconnect Error:", err.message);
+        next(new ApiError(500, "Failed to disconnect WhatsApp account"));
+    }
+};

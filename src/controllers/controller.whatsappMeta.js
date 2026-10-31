@@ -512,70 +512,96 @@ export const getMetaTemplates = async (req, res, next) => {
     }
 };
 
+
 // ==========================================
-// 12. SUBMIT CRM TEMPLATE TO META (POST)
+// 12. SUBMIT CRM TEMPLATES TO META (POST) - BULK CAPABLE
 // ==========================================
 export const verifyMetaTemplate = async (req, res, next) => {
     try {
         const adminId = req.admin.id;
-        const { templateId } = req.body;
+        const { templateId, templateIds } = req.body;
 
-        const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
-        const crmTemplate = await prisma.template.findUnique({ where: { id: templateId } });
+        // Support both single ID and Bulk Array of IDs
+        const idsToVerify = templateIds || (templateId ? [templateId] : []);
 
-        if (!crmTemplate) return next(new ApiError(404, "CRM Template not found"));
-        
-        // Meta strictly requires template names to be lowercase alphanumeric with underscores
-        const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-
-        // Construct the Meta Template Payload
-        const payload = {
-            name: metaName,
-            category: "MARKETING", // Default category; can be mapped if your CRM uses specific Meta categories
-            language: "en_US", 
-            components: [
-                {
-                    type: "BODY",
-                    text: crmTemplate.body
-                }
-            ]
-        };
-
-        // If your CRM template body contains variables like {{1}}, Meta REQUIRES example values
-        const hasVariables = /\{\{\d+\}\}/.test(crmTemplate.body);
-        if (hasVariables) {
-            const varCount = (crmTemplate.body.match(/\{\{\d+\}\}/g) || []).length;
-            payload.components[0].example = {
-                body_text: Array(varCount).fill("ExampleData")
-            };
+        if (idsToVerify.length === 0) {
+            return next(new ApiError(400, "Please provide at least one template ID."));
         }
 
-        const metaRes = await fetch(
-            `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates`,
-            {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${config.accessToken}`,
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(payload)
+        const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
+        if (!config || !config.wabaId) {
+            return next(new ApiError(400, "Meta WhatsApp is not configured."));
+        }
+
+        const results = [];
+
+        // Process bulk array
+        for (const id of idsToVerify) {
+            const crmTemplate = await prisma.template.findUnique({ where: { id } });
+            if (!crmTemplate) continue;
+
+            const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            const components = [{ type: "BODY", text: crmTemplate.body }];
+
+            // 1. Handle Dynamic Variables (Meta requires body_text examples for {{1}}, {{2}})
+            const varMatches = crmTemplate.body.match(/\{\{\d+\}\}/g);
+            if (varMatches) {
+                // Meta strictly expects an array wrapping an array of variable examples
+                components[0].example = { body_text: [Array(varMatches.length).fill("ExampleData")] };
             }
-        );
 
-        const data = await metaRes.json();
+            // 2. Handle Media Headers (Images/Documents)
+            if (crmTemplate.whatsappMediaType === "image") {
+                components.push({
+                    type: "HEADER",
+                    format: "IMAGE",
+                    // Meta requires a dummy public URL for validation purposes
+                    example: { header_url: ["https://www.facebook.com/images/fb_icon_325x325.png"] } 
+                });
+            } else if (crmTemplate.whatsappMediaType === "document") {
+                components.push({
+                    type: "HEADER",
+                    format: "DOCUMENT",
+                    example: { header_url: ["https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"] }
+                });
+            }
 
-        if (data.error) {
-            console.error("Meta Verification Rejection:", data.error);
-            return next(new ApiError(400, data.error.message || "Meta rejected the template format"));
+            // 3. Send to Meta
+            const metaRes = await fetch(
+                `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${config.accessToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        name: metaName,
+                        category: "MARKETING",
+                        language: "en_US",
+                        components
+                    })
+                }
+            );
+
+            const data = await metaRes.json();
+            
+            // Record result of this specific template
+            results.push({ 
+                id, 
+                name: crmTemplate.name, 
+                success: !data.error, 
+                error: data.error?.message || null 
+            });
         }
 
         res.status(200).json({ 
             success: true, 
-            message: "Template submitted to Meta successfully! It is now Pending Review.",
-            metaName 
+            message: `Processed ${idsToVerify.length} template(s) for verification.`,
+            results 
         });
     } catch (err) {
         console.error("❌ Verify Template Error:", err.message);
-        next(new ApiError(500, "Internal server error while submitting template"));
+        next(new ApiError(500, "Internal server error while submitting templates"));
     }
 };

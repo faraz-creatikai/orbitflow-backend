@@ -515,6 +515,64 @@ export const getMetaTemplates = async (req, res, next) => {
 
 
 // ==========================================
+// HELPER: Extract Media URL from JSON string
+// ==========================================
+const getFirstMediaUrl = (imageField) => {
+    try {
+        const parsed = typeof imageField === "string" ? JSON.parse(imageField) : imageField;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+// ==========================================
+// HELPER: Upload Media to Meta's Resumable API
+// ==========================================
+const uploadSampleToMeta = async (mediaUrl, accessToken) => {
+    try {
+        // 1. Fetch media from Cloudinary (or any public URL)
+        const imgRes = await fetch(mediaUrl);
+        const buffer = await imgRes.arrayBuffer();
+        const fileLength = buffer.byteLength;
+        const fileType = imgRes.headers.get("content-type") || "image/jpeg";
+
+        // 2. Create Upload Session with Meta
+        const appId = process.env.FB_APP_ID;
+        const sessionRes = await fetch(
+            `https://graph.facebook.com/v21.0/${appId}/uploads?file_length=${fileLength}&file_type=${fileType}&access_token=${accessToken}`,
+            { method: 'POST' }
+        );
+        const sessionData = await sessionRes.json();
+        
+        if (!sessionData.id) {
+            console.error("Meta Session Error:", sessionData);
+            return null;
+        }
+
+        // 3. Upload the actual file bytes to the Session ID
+        const uploadRes = await fetch(
+            `https://graph.facebook.com/v21.0/${sessionData.id}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `OAuth ${accessToken}`,
+                    'file_offset': '0'
+                },
+                body: buffer
+            }
+        );
+        const uploadData = await uploadRes.json();
+        
+        return uploadData.h || null; // Returns the required header_handle
+    } catch (err) {
+        console.error("Meta Media Upload Error:", err);
+        return null;
+    }
+};
+
+// ==========================================
 // 12. SUBMIT CRM TEMPLATES TO META (POST) - BULK CAPABLE
 // ==========================================
 export const verifyMetaTemplate = async (req, res, next) => {
@@ -562,23 +620,36 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 components[0].example = { body_text: [exampleData] };
             }
 
-            // 2. Media Headers
-            if (crmTemplate.whatsappMediaType === "image") {
-                components.push({
-                    type: "HEADER",
-                    format: "IMAGE",
-                    // NOTE: Meta might reject this public URL and demand a "header_handle" instead
-                    example: { header_url: ["https://www.facebook.com/images/fb_icon_325x325.png"] } 
-                });
-            } else if (crmTemplate.whatsappMediaType === "document") {
-                components.push({
-                    type: "HEADER",
-                    format: "DOCUMENT",
-                    example: { header_url: ["https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"] }
-                });
+            // 2. Handle Media Headers (Images/Documents) safely using the Upload API
+            const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
+
+            if (crmTemplate.whatsappMediaType === "image" && mediaUrl) {
+                const handle = await uploadSampleToMeta(mediaUrl, config.accessToken);
+                if (handle) {
+                    components.push({
+                        type: "HEADER",
+                        format: "IMAGE",
+                        example: { header_handle: [handle] } 
+                    });
+                } else {
+                    results.push({ id, name: crmTemplate.name, success: false, error: "Failed to upload image sample to Meta." });
+                    continue; // Skip submitting this template to Meta
+                }
+            } else if (crmTemplate.whatsappMediaType === "document" && mediaUrl) {
+                const handle = await uploadSampleToMeta(mediaUrl, config.accessToken);
+                if (handle) {
+                    components.push({
+                        type: "HEADER",
+                        format: "DOCUMENT",
+                        example: { header_handle: [handle] }
+                    });
+                } else {
+                    results.push({ id, name: crmTemplate.name, success: false, error: "Failed to upload document sample to Meta." });
+                    continue;
+                }
             }
 
-            // 3. Send to Meta
+            // 3. Send Payload to Meta
             const payload = {
                 name: metaName,
                 category: "MARKETING",
@@ -600,29 +671,16 @@ export const verifyMetaTemplate = async (req, res, next) => {
 
             const data = await metaRes.json();
             
-            // 🛑 DEEP ERROR LOGGING
             if (data.error) {
                 console.error(`\n❌ [META REJECTION] Template: ${crmTemplate.name}`);
-                console.error(JSON.stringify(data.error, null, 2)); // Dump entire error object to terminal
+                console.error(JSON.stringify(data.error, null, 2));
 
-                // Build a detailed error string for the frontend UI
                 let deepError = data.error.message;
                 if (data.error.error_user_msg) deepError += ` - ${data.error.error_user_msg}`;
-                if (data.error.error_data && data.error.error_data.details) deepError += ` (Details: ${data.error.error_data.details})`;
-
-                results.push({ 
-                    id, 
-                    name: crmTemplate.name, 
-                    success: false, 
-                    error: deepError 
-                });
+                
+                results.push({ id, name: crmTemplate.name, success: false, error: deepError });
             } else {
-                results.push({ 
-                    id, 
-                    name: crmTemplate.name, 
-                    success: true, 
-                    error: null 
-                });
+                results.push({ id, name: crmTemplate.name, success: true, error: null });
             }
         }
 

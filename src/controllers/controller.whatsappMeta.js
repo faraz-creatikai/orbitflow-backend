@@ -251,7 +251,30 @@ export const checkWhatsAppConnection = async (req, res, next) => {
         });
 
         if (config && config.activeProvider === "meta") {
-            return res.status(200).json({ connected: true, config });
+            // 🛑 Verify with Meta Graph API to ensure the token and ID are real
+            const metaRes = await fetch(
+                `https://graph.facebook.com/v21.0/${config.phoneNumberId}?fields=verified_name,display_phone_number,profile_picture_url,quality_rating&access_token=${config.accessToken}`
+            );
+            
+            const metaData = await metaRes.json();
+
+            // If Meta returns an error (e.g., fake ID, expired token), it's not truly connected
+            if (metaData.error) {
+                console.error("Meta API Validation Error:", metaData.error.message);
+                return res.status(200).json({ connected: false });
+            }
+
+            // Successfully fetched real data from Meta
+            return res.status(200).json({ 
+                connected: true, 
+                config,
+                accountDetails: {
+                    name: metaData.verified_name || "WhatsApp Business Account",
+                    phone: metaData.display_phone_number || "Unknown Number",
+                    profilePicture: metaData.profile_picture_url || null,
+                    qualityRating: metaData.quality_rating || "UNKNOWN"
+                }
+            });
         }
         
         return res.status(200).json({ connected: false });
@@ -260,4 +283,3 @@ export const checkWhatsAppConnection = async (req, res, next) => {
         next(new ApiError(500, "Failed to check WhatsApp connection status"));
     }
 };
-

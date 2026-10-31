@@ -318,3 +318,82 @@ export const disconnectMetaWhatsapp = async (req, res, next) => {
         next(new ApiError(500, "Failed to disconnect WhatsApp account"));
     }
 };
+
+
+
+// ==========================================
+// 6. SEND MESSAGE (POST)
+// ==========================================
+export const sendMetaWhatsAppMessage = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const { toPhone, messageBody } = req.body; 
+
+        // 1. Verify Meta config exists
+        const config = await prisma.whatsAppMetaConfig.findUnique({
+            where: { adminId }
+        });
+
+        if (!config || config.activeProvider !== "meta" || !config.accessToken || !config.phoneNumberId) {
+            return next(new ApiError(400, "Official WhatsApp is not configured or active."));
+        }
+
+        // 2. Format phone number (Meta requires country code without '+' or spaces)
+        // e.g., "+91 98765-43210" -> "919876543210"
+        const cleanPhone = toPhone.replace(/\D/g, "");
+
+        // 3. Send to Meta Graph API
+        const metaRes = await fetch(
+            `https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`,
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${config.accessToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    recipient_type: "individual",
+                    to: cleanPhone,
+                    type: "text",
+                    text: { preview_url: false, body: messageBody }
+                })
+            }
+        );
+
+        const metaData = await metaRes.json();
+        
+        if (metaData.error) {
+            console.error("Meta Send API Error:", metaData.error);
+            return next(new ApiError(400, metaData.error.message || "Failed to send message via Meta"));
+        }
+
+        // 4. Save outgoing message to database
+        const savedMsg = await prisma.whatsAppMessage.create({
+            data: {
+                adminId,
+                phoneKey: cleanPhone.slice(-10), // Keep consistent with incoming webhook logic
+                waId: metaData.messages[0].id,   // Meta's unique message ID
+                fromMe: true,
+                type: "text",
+                body: messageBody,
+                status: "sent",
+                isRead: true,
+                source: "meta",
+                timestamp: new Date()
+            }
+        });
+
+        // 5. Emit to Socket (keeps other admin tabs in sync)
+        emitToAdmin(adminId, "whatsapp:message", savedMsg);
+
+        res.status(200).json({ 
+            success: true, 
+            message: "Message sent successfully", 
+            data: savedMsg 
+        });
+    } catch (error) {
+        console.error("❌ Send Meta Message Error:", error.message);
+        next(new ApiError(500, "Internal server error while sending WhatsApp message"));
+    }
+};

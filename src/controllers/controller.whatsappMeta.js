@@ -244,35 +244,41 @@ export const receiveWhatsAppMessage = async (req, res) => {
 // ==========================================
 export const checkWhatsAppConnection = async (req, res, next) => {
     try {
-        const adminId = req.admin.id; // Assuming auth middleware sets this
+        const adminId = req.admin.id;
         
         const config = await prisma.whatsAppMetaConfig.findUnique({
             where: { adminId }
         });
 
         if (config && config.activeProvider === "meta") {
-            // 🛑 Verify with Meta Graph API to ensure the token and ID are real
-            const metaRes = await fetch(
-                `https://graph.facebook.com/v21.0/${config.phoneNumberId}?fields=verified_name,display_phone_number,profile_picture_url,quality_rating&access_token=${config.accessToken}`
+            // 1. Fetch phone number details (verified name, display number, quality rating)
+            const phoneRes = await fetch(
+                `https://graph.facebook.com/v21.0/${config.phoneNumberId}?fields=verified_name,display_phone_number,quality_rating&access_token=${config.accessToken}`
             );
-            
-            const metaData = await metaRes.json();
+            const phoneData = await phoneRes.json();
 
-            // If Meta returns an error (e.g., fake ID, expired token), it's not truly connected
-            if (metaData.error) {
-                console.error("Meta API Validation Error:", metaData.error.message);
+            if (phoneData.error) {
+                console.error("Meta Phone API Error:", phoneData.error.message);
                 return res.status(200).json({ connected: false });
             }
 
-            // Successfully fetched real data from Meta
+            // 2. Fetch business profile details (profile picture, about) from the correct sub-endpoint
+            const profileRes = await fetch(
+                `https://graph.facebook.com/v21.0/${config.phoneNumberId}/whatsapp_business_profile?fields=profile_picture_url,about&access_token=${config.accessToken}`
+            );
+            const profileData = await profileRes.json();
+
+            // Extract profile picture safely (profileData.data[0] contains the profile object)
+            const profilePictureUrl = profileData.data?.[0]?.profile_picture_url || null;
+
             return res.status(200).json({ 
                 connected: true, 
                 config,
                 accountDetails: {
-                    name: metaData.verified_name || "WhatsApp Business Account",
-                    phone: metaData.display_phone_number || "Unknown Number",
-                    profilePicture: metaData.profile_picture_url || null,
-                    qualityRating: metaData.quality_rating || "UNKNOWN"
+                    name: phoneData.verified_name || "WhatsApp Business Account",
+                    phone: phoneData.display_phone_number || "Unknown Number",
+                    profilePicture: profilePictureUrl,
+                    qualityRating: phoneData.quality_rating || "UNKNOWN"
                 }
             });
         }

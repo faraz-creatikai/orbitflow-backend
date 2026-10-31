@@ -1,6 +1,6 @@
-import prisma from "../config/prismaClient";
-import { getSocket } from "../socket/socket";
-import ApiError from "../utils/ApiError";
+import prisma from "../config/prismaClient.js";
+import { getSocket } from "../socket/socket.js";
+import ApiError from "../utils/ApiError.js";
 
 
 // Helper to emit events to a specific admin's socket room

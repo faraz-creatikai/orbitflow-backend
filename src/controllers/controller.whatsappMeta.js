@@ -158,20 +158,35 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
         const adminId = config.adminId;
 
-        // ------------------------------------------------
-        // A. Handle Status Updates (Sent, Delivered, Read)
+       // ------------------------------------------------
+        // A. Handle Status Updates (Sent, Delivered, Read, Failed)
         // ------------------------------------------------
         if (changes.statuses?.length > 0) {
             for (const statusObj of changes.statuses) {
                 const waId = statusObj.id;
                 const status = statusObj.status; 
 
-                const updatedMsg = await prisma.whatsAppMessage.updateMany({
-                    where: { adminId, waId },
-                    data: { status }
+                const existingMsg = await prisma.whatsAppMessage.findUnique({
+                    where: { adminId_waId: { adminId, waId } }
                 });
 
-                if (updatedMsg.count > 0) {
+                if (existingMsg) {
+                    await prisma.whatsAppMessage.update({
+                        where: { id: existingMsg.id },
+                        data: { status }
+                    });
+
+                    // 🛑 CAMPAIGN ANALYTICS: Increment session metrics
+                    if (existingMsg.campaignSessionId) {
+                        const metricField = status === "delivered" ? "delivered" : (status === "read" ? "read" : (status === "failed" ? "failed" : null));
+                        if (metricField) {
+                            await prisma.whatsAppCampaignSession.update({
+                                where: { id: existingMsg.campaignSessionId },
+                                data: { [metricField]: { increment: 1 } }
+                            });
+                        }
+                    }
+
                     emitToAdmin(adminId, "whatsapp:message_status", { waId, status });
                 }
             }
@@ -186,21 +201,8 @@ export const receiveWhatsAppMessage = async (req, res) => {
                 const fromPhone = msg.from; 
                 const phoneKey = fromPhone.slice(-10); 
                 const type = msg.type; 
-
-                let messageBody = "";
-                let mediaUrl = null;
-
-                if (type === "text") {
-                    messageBody = msg.text?.body || "";
-                } else if (type === "image") {
-                    messageBody = msg.image?.caption || "📷 Image";
-                } else if (type === "document") {
-                    messageBody = msg.document?.caption || msg.document?.filename || "📄 Document";
-                } else if (type === "button") { 
-                    messageBody = msg.button?.text || "";
-                } else {
-                    messageBody = `Received a ${type}`;
-                }
+                
+                // ... (Keep your existing messageBody and mediaUrl extraction logic here) ...
 
                 const exists = await prisma.whatsAppMessage.findUnique({
                     where: { adminId_waId: { adminId, waId } }
@@ -210,19 +212,26 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
                 const savedMsg = await prisma.whatsAppMessage.create({
                     data: {
-                        adminId,
-                        phoneKey,
-                        waId,
-                        fromMe: false, 
+                        adminId, phoneKey, waId, fromMe: false, 
                         type: type === "button" ? "text" : type,
-                        body: messageBody,
-                        status: "delivered", 
-                        isRead: false,
-                        source: "meta",
-                        mediaUrl,
+                        body: messageBody, status: "delivered", isRead: false,
+                        source: "meta", mediaUrl,
                         timestamp: new Date(Number(msg.timestamp) * 1000),
                     }
                 });
+
+                // 🛑 CAMPAIGN ANALYTICS: Detect if this is a reply to a campaign
+                const recentCampaignMsg = await prisma.whatsAppMessage.findFirst({
+                    where: { adminId, phoneKey, fromMe: true, campaignSessionId: { not: null } },
+                    orderBy: { timestamp: 'desc' }
+                });
+
+                if (recentCampaignMsg && recentCampaignMsg.campaignSessionId) {
+                    await prisma.whatsAppCampaignSession.update({
+                        where: { id: recentCampaignMsg.campaignSessionId },
+                        data: { replied: { increment: 1 } }
+                    });
+                }
 
                 emitToAdmin(adminId, "whatsapp:message", savedMsg);
             }

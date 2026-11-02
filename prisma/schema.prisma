@@ -188,11 +188,55 @@ model WhatsAppMessage {
   pollSecret String?
   pollVotes  Json?
 
+  campaignSessionId String?
+  session           WhatsAppCampaignSession? @relation(fields: [campaignSessionId], references: [id], onDelete: SetNull)
+
   timestamp DateTime
   createdAt DateTime @default(now())
 
   @@unique([adminId, waId])
   @@index([adminId, phoneKey, timestamp])
+}
+
+
+
+
+model WhatsAppCampaign {
+  id          String   @id @default(uuid())
+  adminId     String   // Links to the Admin who created it
+  name        String
+  templateId  String   // References the local CRM Template ID
+  status      String   @default("DRAFT") // DRAFT, ACTIVE, COMPLETED
+  
+  targetIds   Json     @default("[]") // Array of selected Customer IDs
+  scheduledAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  sessions    WhatsAppCampaignSession[]
+}
+
+model WhatsAppCampaignSession {
+  id              String   @id @default(uuid())
+  campaignId      String
+  adminId         String
+  
+  status          String   @default("RUNNING") // RUNNING, COMPLETED, FAILED
+  totalRecipients Int      @default(0)
+  
+  // Real-time tracking metrics updated via Webhooks
+  sent            Int      @default(0)
+  delivered       Int      @default(0)
+  read            Int      @default(0)
+  replied         Int      @default(0)
+  failed          Int      @default(0)
+  
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  campaign        WhatsAppCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  messages        WhatsAppMessage[] // Ties actual delivered messages back to this session
 }
 
 model Campaign {

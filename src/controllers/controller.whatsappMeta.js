@@ -131,13 +131,12 @@ export const verifyWhatsAppWebhook = (req, res) => {
 // 3. INCOMING MESSAGES & STATUS UPDATES (POST)
 // ==========================================
 export const receiveWhatsAppMessage = async (req, res) => {
-    // 1. ALWAYS return 200 OK immediately so Meta doesn't retry the payload
+    // 1. ALWAYS return 200 OK immediately
     res.sendStatus(200);
 
     try {
         const body = req.body;
 
-        // Check if this is a WhatsApp Business Account event
         if (body.object !== "whatsapp_business_account") return;
 
         const entry = body.entry?.[0];
@@ -147,7 +146,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
         const phoneNumberId = changes.metadata?.phone_number_id;
 
-        // Find which Admin owns this phone number
+        // Ensure we find the config. Use findFirst in case of multiple tests.
         const config = await prisma.whatsAppMetaConfig.findFirst({
             where: { phoneNumberId }
         });
@@ -165,9 +164,8 @@ export const receiveWhatsAppMessage = async (req, res) => {
         if (changes.statuses?.length > 0) {
             for (const statusObj of changes.statuses) {
                 const waId = statusObj.id;
-                const status = statusObj.status; // "sent", "delivered", "read", "failed"
+                const status = statusObj.status; 
 
-                // Update the status in the database
                 const updatedMsg = await prisma.whatsAppMessage.updateMany({
                     where: { adminId, waId },
                     data: { status }
@@ -185,51 +183,47 @@ export const receiveWhatsAppMessage = async (req, res) => {
         if (changes.messages?.length > 0) {
             for (const msg of changes.messages) {
                 const waId = msg.id;
-                const fromPhone = msg.from; // e.g., "919876543210"
-                const phoneKey = fromPhone.slice(-10); // Extract last 10 digits to match your DB logic
-                const type = msg.type; // "text", "image", "document", etc.
+                const fromPhone = msg.from; 
+                const phoneKey = fromPhone.slice(-10); 
+                const type = msg.type; 
 
                 let messageBody = "";
                 let mediaUrl = null;
 
-                // Extract content based on message type
                 if (type === "text") {
                     messageBody = msg.text?.body || "";
                 } else if (type === "image") {
-                    messageBody = msg.image?.caption || "";
-                    // Meta Media ID. You will need a separate function to download this if you want it locally.
-                    // mediaUrl = msg.image.id; 
+                    messageBody = msg.image?.caption || "📷 Image";
                 } else if (type === "document") {
-                    messageBody = msg.document?.caption || msg.document?.filename || "";
-                } else if (type === "button") { // If they clicked a quick reply template button
+                    messageBody = msg.document?.caption || msg.document?.filename || "📄 Document";
+                } else if (type === "button") { 
                     messageBody = msg.button?.text || "";
+                } else {
+                    messageBody = `Received a ${type}`;
                 }
 
-                // Check if message already exists to prevent duplicates
                 const exists = await prisma.whatsAppMessage.findUnique({
                     where: { adminId_waId: { adminId, waId } }
                 });
 
                 if (exists) continue;
 
-                // Save to database
                 const savedMsg = await prisma.whatsAppMessage.create({
                     data: {
                         adminId,
                         phoneKey,
                         waId,
-                        fromMe: false, // It's an incoming message
+                        fromMe: false, 
                         type: type === "button" ? "text" : type,
                         body: messageBody,
-                        status: "delivered", // Mark as delivered since it reached your server
+                        status: "delivered", 
                         isRead: false,
-                        source: "meta", // 👈 Mark that it came from official API, not Baileys
+                        source: "meta",
                         mediaUrl,
                         timestamp: new Date(Number(msg.timestamp) * 1000),
                     }
                 });
 
-                // Emit to frontend CRM in real-time
                 emitToAdmin(adminId, "whatsapp:message", savedMsg);
             }
         }
@@ -703,3 +697,5 @@ export const verifyMetaTemplate = async (req, res, next) => {
         next(new ApiError(500, "Internal server error while submitting templates"));
     }
 };
+
+

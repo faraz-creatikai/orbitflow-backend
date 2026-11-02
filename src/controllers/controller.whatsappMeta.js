@@ -147,7 +147,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
         const phoneNumberId = changes.metadata?.phone_number_id;
 
         // Ensure we find the config. Use findFirst in case of multiple tests.
-        /* const config = await prisma.whatsAppMetaConfig.findFirst({
+        const config = await prisma.whatsAppMetaConfig.findFirst({
             where: { phoneNumberId }
         });
 
@@ -156,9 +156,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
             return;
         }
 
-        const adminId = config.adminId; */
-
-        const adminId = "dad1cf5a-aab2-47a0-b027-3e91f6a28cb4";
+        const adminId = config.adminId;
 
         // ------------------------------------------------
         // A. Handle Status Updates (Sent, Delivered, Read)

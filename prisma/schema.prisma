@@ -87,6 +87,7 @@ model Admin {
   linkedinAccount    LinkedinAccount?
   whatsappMessages   WhatsAppMessage[]
   whatsappMetaConfig WhatsAppMetaConfig?
+  emailConfig AdminEmailConfig?
 
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -145,6 +146,44 @@ model CallingAgentConfig {
   updatedAt DateTime @updatedAt
 
   @@index([isActive]) // Optimizes the database query when searching for the active agent
+}
+
+
+
+model AdminEmailConfig {
+  id      String @id @default(uuid())
+  adminId String @unique // one mailbox per admin
+  admin   Admin  @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  // identity
+  email         String // mailbox address (also the "from" address)
+  fromName      String
+  provider      String // gmail | zoho | hostinger | custom | ...
+  providerLabel String
+
+  // outgoing (SMTP) — all auto-detected
+  smtpHost    String
+  smtpPort    Int
+  smtpSecure  Boolean // true = implicit TLS (465), false = STARTTLS
+  smtpUser    String
+  smtpPassEnc String  @db.Text // AES-256-GCM encrypted, never returned by the API
+
+  // optional: save a copy into the Sent folder via IMAP (auto-detected)
+  saveToSent Boolean @default(false)
+  imapHost   String?
+  imapPort   Int?
+  imapSecure Boolean?
+  imapUser   String?
+  sentFolder String?
+
+  // health
+  isActive       Boolean   @default(true)
+  status         String    @default("connected") // connected | failed
+  lastVerifiedAt DateTime?
+  lastError      String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WhatsAppMetaConfig {

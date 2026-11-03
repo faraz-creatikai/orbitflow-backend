@@ -89,7 +89,7 @@ export const sendEmailByTemplate = async (req, res, next) => {
     if (template.type !== "email")
       return next(new ApiError(400, "Template type must be 'email'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll, admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -108,7 +108,7 @@ export const sendEmailByTemplate = async (req, res, next) => {
         const subject = replacePlaceholders(template.subject, c);
         const html = replacePlaceholders(template.body, c);
 
-        const info = await sendEmail(c.Email, subject, html);
+        const info = await sendEmail(c.Email, subject, html, { adminId: req.admin.id });
 
         results.push({
           id: c.id,
@@ -151,7 +151,7 @@ export const sendWhatsAppByTemplate = async (req, res, next) => {
     if (template.type !== "whatsapp")
       return next(new ApiError(400, "Template type must be 'whatsapp'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll, admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -228,7 +228,7 @@ export const sendBaileysWhatsAppByTemplate = async (req, res, next) => {
     if (template.type !== "whatsapp")
       return next(new ApiError(400, "Template type must be 'whatsapp'"));
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll, admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -384,7 +384,7 @@ export const sendBaileysWhatsAppProperties = async (req, res, next) => {
     }
 
     // 2. Resolve target customers
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll ,admin: req.admin});
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll, admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No destination customers found"));
 
     const results = [];
@@ -499,7 +499,7 @@ export const sendDirectWhatsAppMessage = async (req, res, next) => {
       fileBuffer = fs.readFileSync(file.path);
     }
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll: sendToAll === "true",admin: req.admin });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll: sendToAll === "true", admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -775,7 +775,7 @@ export const sendEmailDirectToCustomers = async (req, res, next) => {
       return next(new ApiError(400, "Either userPrompt or Subject & Body is required"));
     }
 
-    const customers = await fetchTargetCustomers({ customerIds, sendToAll,admin: req.admin });
+    const customers = await fetchTargetCustomers({ customerIds, sendToAll, admin: req.admin });
     if (!customers.length) return next(new ApiError(404, "No customers found"));
 
     const results = [];
@@ -817,7 +817,7 @@ export const sendEmailDirectToCustomers = async (req, res, next) => {
           body = replacePlaceholders(Body, c);
         }
 
-        const info = await sendEmail(c.Email, subject, body);
+        const info = await sendEmail(c.Email, subject, body, { adminId: req.admin.id });
         results.push({ id: c.id, email: c.Email, status: "sent", metadata, workSummary, info: info.messageId || info.response });
       } catch (err) {
         results.push({ id: c.id, name: c.customerName, status: "failed", error: err.message });

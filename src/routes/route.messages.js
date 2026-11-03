@@ -15,14 +15,26 @@ import cloudinary from "../config/cloudinary.js";
 import fs from "fs"
 import { protectRoute } from "../middlewares/auth.js";
 import { deleteChat, getChatMessages, getInboxSummary, markChatRead } from "../controllers/controller.whatsappInbox.js";
+import { connectEmail, disconnectEmail, getEmailConnection, testEmailConnection, verifyEmailConnection } from "../controllers/controller.emailconnection.js";
 
 const messageRoutes = express.Router();
 messageRoutes.use(protectRoute);
 
+
+//email routes
+
 messageRoutes.post("/email", sendEmailByTemplate);
+messageRoutes.get("/email-connection", getEmailConnection);
+messageRoutes.post("/email-connection/test", testEmailConnection);
+messageRoutes.post("/email-connection", connectEmail);
+messageRoutes.post("/email-connection/verify", verifyEmailConnection);
+messageRoutes.delete("/email-connection", disconnectEmail);
+
+
+
 messageRoutes.post("/whatsapp", sendBaileysWhatsAppByTemplate);
-messageRoutes.post("/whatsapp/send-properties",sendBaileysWhatsAppProperties);
-messageRoutes.post("/whatsapp/direct-message",templateUpload.fields([{ name: "whatsappFile", maxCount: 5 }]),sendDirectWhatsAppMessage);
+messageRoutes.post("/whatsapp/send-properties", sendBaileysWhatsAppProperties);
+messageRoutes.post("/whatsapp/direct-message", templateUpload.fields([{ name: "whatsappFile", maxCount: 5 }]), sendDirectWhatsAppMessage);
 
 messageRoutes.get('/whatsapp/inbox/summary', getInboxSummary);
 messageRoutes.get('/whatsapp/inbox/chat/:phoneKey', getChatMessages)
@@ -38,7 +50,7 @@ messageRoutes.post("/uploads/file", upload.single("file"), async (req, res) => {
     });
 
     // clean up the local temp file now that it's on Cloudinary
-    fs.unlink(req.file.path, () => {});
+    fs.unlink(req.file.path, () => { });
 
     // GrapesJS's default asset manager expects this exact shape
     res.json({ data: [result.secure_url] });
@@ -76,11 +88,11 @@ messageRoutes.post('/whatsapp-connection-pairing-code', async (req, res) => {
   }
 });
 
-messageRoutes.post("/send-email-via-ai",sendEmailDirectToCustomers);
+messageRoutes.post("/send-email-via-ai", sendEmailDirectToCustomers);
 
 
 
-messageRoutes.post("/call",callCustomer);
+messageRoutes.post("/call", callCustomer);
 
 messageRoutes.all("/exotel/voice", (req, res) => {
   res.set("Content-Type", "text/xml");

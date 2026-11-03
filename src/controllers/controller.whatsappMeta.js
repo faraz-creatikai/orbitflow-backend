@@ -729,10 +729,24 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
             metaTemplateName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
         }
 
-        // 1. Map targets to objects to keep track of names for {{1}} variables
+        // 1. DYNAMICALLY FETCH EXACT LANGUAGE CODE FROM META
+        const templatesRes = await fetch(
+            `https://graph.facebook.com/v21.0/${config.wabaId}/message_templates?name=${metaTemplateName}&access_token=${config.accessToken}`
+        );
+        const templatesData = await templatesRes.json();
+        
+        // Find the approved version of this template
+        const metaTempObj = templatesData.data?.find(t => t.name === metaTemplateName && t.status === 'APPROVED');
+        
+        if (!metaTempObj) {
+            return next(new ApiError(400, `Template '${metaTemplateName}' is not approved by Meta yet or does not exist.`));
+        }
+
+        const exactLanguageCode = metaTempObj.language || "en_US";
+
+        // 2. Map targets to objects to keep track of names for {{1}} variables
         let targets = [];
         if (toPhone) {
-            // Fallback name "Customer" for single Inbox sends where we only have the phone
             targets.push({ phone: toPhone.replace(/\D/g, ""), name: "Customer" }); 
         }
         if (targetIds && targetIds.length > 0) {
@@ -755,52 +769,50 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
 
         for (const target of targets) {
             
-            // 2. Construct components for Meta Payload (Images, Documents, Variables)
+            // 3. Construct components for Meta Payload (Images, Documents, Variables)
             const components = [];
             
             if (crmTemplate) {
-                // Handle dynamic body variables like {{1}} or {{Name}}
-                if (crmTemplate.body.includes("{{1}}") || crmTemplate.body.includes("{{Name}}")) {
-                    components.push({
-                        type: "BODY",
-                        parameters: [{ type: "text", text: target.name }]
-                    });
-                }
-
-                // Handle Media Headers using your existing helper
-                const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
+                // 🛑 META SEND REQUIRES LOWERCASE "header" and "body"
                 
+                const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
                 if (crmTemplate.whatsappMediaType === "image" && mediaUrl) {
                     components.push({
-                        type: "HEADER",
+                        type: "header", 
                         parameters: [{ type: "image", image: { link: mediaUrl } }]
                     });
                 } else if (crmTemplate.whatsappMediaType === "document" && mediaUrl) {
                     const fileName = crmTemplate.whatsappFileName || "Document";
                     components.push({
-                        type: "HEADER",
+                        type: "header",
                         parameters: [{ type: "document", document: { link: mediaUrl, filename: fileName } }]
+                    });
+                }
+
+                if (crmTemplate.body.includes("{{1}}") || crmTemplate.body.includes("{{Name}}")) {
+                    components.push({
+                        type: "body", 
+                        parameters: [{ type: "text", text: target.name }]
                     });
                 }
             }
 
-            // 3. Build Final Meta Payload
+            // 4. Build Final Meta Payload
             const payload = {
                 messaging_product: "whatsapp",
                 to: target.phone,
                 type: "template",
                 template: {
                     name: metaTemplateName,
-                    language: { code: "en_US" }
+                    language: { code: exactLanguageCode } // 👈 Using the dynamically fetched language
                 }
             };
 
-            // Meta throws an error if 'components' is passed as an empty array, so only attach if populated
             if (components.length > 0) {
                 payload.template.components = components;
             }
 
-            // 4. Send to Meta API
+            // 5. Send to Meta API
             const metaRes = await fetch(
                 `https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`,
                 {
@@ -816,7 +828,6 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
             const metaData = await metaRes.json();
 
             if (metaData.error) {
-                // 🛑 CRITICAL LOGGING ADDED HERE
                 console.error(`\n❌ [META SEND ERROR] to ${target.phone}:`, JSON.stringify(metaData.error, null, 2));
                 errors.push({ phone: target.phone, error: metaData.error.message });
             } else {
@@ -849,5 +860,4 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
         next(new ApiError(500, "Failed to send template."));
     }
 };
-
 

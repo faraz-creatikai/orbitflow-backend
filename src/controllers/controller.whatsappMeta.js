@@ -735,7 +735,6 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
         );
         const templatesData = await templatesRes.json();
         
-        // Find the approved version of this template
         const metaTempObj = templatesData.data?.find(t => t.name === metaTemplateName && t.status === 'APPROVED');
         
         if (!metaTempObj) {
@@ -769,12 +768,11 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
 
         for (const target of targets) {
             
-            // 3. Construct components for Meta Payload (Images, Documents, Variables)
+            // 3. Construct components for Meta Payload
             const components = [];
             
             if (crmTemplate) {
                 // 🛑 META SEND REQUIRES LOWERCASE "header" and "body"
-                
                 const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
                 if (crmTemplate.whatsappMediaType === "image" && mediaUrl) {
                     components.push({
@@ -789,10 +787,18 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
                     });
                 }
 
-                if (crmTemplate.body.includes("{{1}}") || crmTemplate.body.includes("{{Name}}")) {
+                // 🛑 ROBUST VARIABLE EXTRACTION: Maps exact parameters for every {{variable}} found
+                const varMatches = crmTemplate.body.match(/\{\{(.+?)\}\}/g);
+                if (varMatches && varMatches.length > 0) {
+                    const parameters = varMatches.map((match, index) => {
+                        // Fill {{1}} with Name, and fallback string for any additional {{2}}, {{3}} variables
+                        if (index === 0) return { type: "text", text: target.name || "Customer" };
+                        return { type: "text", text: "Details" }; 
+                    });
+                    
                     components.push({
                         type: "body", 
-                        parameters: [{ type: "text", text: target.name }]
+                        parameters
                     });
                 }
             }
@@ -804,7 +810,7 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
                 type: "template",
                 template: {
                     name: metaTemplateName,
-                    language: { code: exactLanguageCode } // 👈 Using the dynamically fetched language
+                    language: { code: exactLanguageCode }
                 }
             };
 

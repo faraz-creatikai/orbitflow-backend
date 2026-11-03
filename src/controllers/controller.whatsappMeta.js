@@ -708,6 +708,7 @@ export const verifyMetaTemplate = async (req, res, next) => {
 };
 
 
+
 // ==========================================
 // SEND META TEMPLATE MESSAGE (Direct/Quick Send)
 // ==========================================
@@ -719,7 +720,6 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
         const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
         if (!config || config.activeProvider !== "meta") return next(new ApiError(400, "WhatsApp not configured."));
 
-        // Support passing either a specific CRM template ID, or a raw Meta template name
         let metaTemplateName = templateName;
         let crmTemplate = null;
 
@@ -729,23 +729,78 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
             metaTemplateName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
         }
 
-        // Determine targets (either a direct phone number from Inbox, or array of IDs from Template Tab)
-        let phones = [];
-        if (toPhone) phones.push(toPhone.replace(/\D/g, ""));
+        // 1. Map targets to objects to keep track of names for {{1}} variables
+        let targets = [];
+        if (toPhone) {
+            // Fallback name "Customer" for single Inbox sends where we only have the phone
+            targets.push({ phone: toPhone.replace(/\D/g, ""), name: "Customer" }); 
+        }
         if (targetIds && targetIds.length > 0) {
             const customers = await prisma.customer.findMany({
                 where: { id: { in: targetIds } },
                 select: { ContactNumber: true, customerName: true }
             });
-            phones = [...phones, ...customers.map(c => c.ContactNumber.replace(/\D/g, ""))];
+            customers.forEach(c => {
+                targets.push({ 
+                    phone: c.ContactNumber.replace(/\D/g, ""), 
+                    name: c.customerName || "Customer" 
+                });
+            });
         }
 
-        if (phones.length === 0) return next(new ApiError(400, "No valid phone numbers provided."));
+        if (targets.length === 0) return next(new ApiError(400, "No valid phone numbers provided."));
 
         let sentCount = 0;
+        let errors = [];
 
-        for (const cleanPhone of phones) {
-            // Send to Meta API
+        for (const target of targets) {
+            
+            // 2. Construct components for Meta Payload (Images, Documents, Variables)
+            const components = [];
+            
+            if (crmTemplate) {
+                // Handle dynamic body variables like {{1}} or {{Name}}
+                if (crmTemplate.body.includes("{{1}}") || crmTemplate.body.includes("{{Name}}")) {
+                    components.push({
+                        type: "BODY",
+                        parameters: [{ type: "text", text: target.name }]
+                    });
+                }
+
+                // Handle Media Headers using your existing helper
+                const mediaUrl = getFirstMediaUrl(crmTemplate.whatsappImage);
+                
+                if (crmTemplate.whatsappMediaType === "image" && mediaUrl) {
+                    components.push({
+                        type: "HEADER",
+                        parameters: [{ type: "image", image: { link: mediaUrl } }]
+                    });
+                } else if (crmTemplate.whatsappMediaType === "document" && mediaUrl) {
+                    const fileName = crmTemplate.whatsappFileName || "Document";
+                    components.push({
+                        type: "HEADER",
+                        parameters: [{ type: "document", document: { link: mediaUrl, filename: fileName } }]
+                    });
+                }
+            }
+
+            // 3. Build Final Meta Payload
+            const payload = {
+                messaging_product: "whatsapp",
+                to: target.phone,
+                type: "template",
+                template: {
+                    name: metaTemplateName,
+                    language: { code: "en_US" }
+                }
+            };
+
+            // Meta throws an error if 'components' is passed as an empty array, so only attach if populated
+            if (components.length > 0) {
+                payload.template.components = components;
+            }
+
+            // 4. Send to Meta API
             const metaRes = await fetch(
                 `https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`,
                 {
@@ -754,28 +809,23 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
                         "Authorization": `Bearer ${config.accessToken}`,
                         "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({
-                        messaging_product: "whatsapp",
-                        to: cleanPhone,
-                        type: "template",
-                        template: {
-                            name: metaTemplateName,
-                            language: { code: "en_US" }
-                            // Note: Add components array here if you need dynamic {{1}} replacements
-                        }
-                    })
+                    body: JSON.stringify(payload)
                 }
             );
 
             const metaData = await metaRes.json();
 
-            if (!metaData.error) {
+            if (metaData.error) {
+                // 🛑 CRITICAL LOGGING ADDED HERE
+                console.error(`\n❌ [META SEND ERROR] to ${target.phone}:`, JSON.stringify(metaData.error, null, 2));
+                errors.push({ phone: target.phone, error: metaData.error.message });
+            } else {
                 sentCount++;
-                // Log it to the Inbox database so it shows up in chat history
+                // Log it to the Inbox database
                 await prisma.whatsAppMessage.create({
                     data: {
                         adminId,
-                        phoneKey: cleanPhone.slice(-10),
+                        phoneKey: target.phone.slice(-10),
                         waId: metaData.messages[0].id,
                         fromMe: true,
                         type: "template",
@@ -789,8 +839,13 @@ export const sendMetaTemplateMessage = async (req, res, next) => {
             }
         }
 
-        res.status(200).json({ success: true, message: `Template sent to ${sentCount} recipients.` });
+        res.status(200).json({ 
+            success: sentCount > 0, 
+            message: `Template sent to ${sentCount} recipients.`,
+            errors: errors.length > 0 ? errors : undefined
+        });
     } catch (error) {
+        console.error("❌ Send Template Controller Error:", error);
         next(new ApiError(500, "Failed to send template."));
     }
 };

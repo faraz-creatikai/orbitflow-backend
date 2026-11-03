@@ -158,13 +158,13 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
         const adminId = config.adminId;
 
-       // ------------------------------------------------
+        // ------------------------------------------------
         // A. Handle Status Updates (Sent, Delivered, Read, Failed)
         // ------------------------------------------------
         if (changes.statuses?.length > 0) {
             for (const statusObj of changes.statuses) {
                 const waId = statusObj.id;
-                const status = statusObj.status; 
+                const status = statusObj.status;
 
                 const existingMsg = await prisma.whatsAppMessage.findUnique({
                     where: { adminId_waId: { adminId, waId } }
@@ -198,10 +198,10 @@ export const receiveWhatsAppMessage = async (req, res) => {
         if (changes.messages?.length > 0) {
             for (const msg of changes.messages) {
                 const waId = msg.id;
-                const fromPhone = msg.from; 
-                const phoneKey = fromPhone.slice(-10); 
-                const type = msg.type; 
-                
+                const fromPhone = msg.from;
+                const phoneKey = fromPhone.slice(-10);
+                const type = msg.type;
+
                 // ... (Keep your existing messageBody and mediaUrl extraction logic here) ...
 
                 const exists = await prisma.whatsAppMessage.findUnique({
@@ -212,7 +212,7 @@ export const receiveWhatsAppMessage = async (req, res) => {
 
                 const savedMsg = await prisma.whatsAppMessage.create({
                     data: {
-                        adminId, phoneKey, waId, fromMe: false, 
+                        adminId, phoneKey, waId, fromMe: false,
                         type: type === "button" ? "text" : type,
                         body: messageBody, status: "delivered", isRead: false,
                         source: "meta", mediaUrl,
@@ -495,7 +495,7 @@ export const getMetaTemplates = async (req, res, next) => {
     try {
         const adminId = req.admin.id;
         const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
-        
+
         if (!config || config.activeProvider !== "meta" || !config.wabaId) {
             return res.status(200).json({ success: true, metaTemplates: [] });
         }
@@ -537,7 +537,7 @@ const uploadSampleToMeta = async (mediaUrl) => {
     try {
         const appId = process.env.FB_APP_ID;
         const appSecret = process.env.FB_APP_SECRET;
-        
+
         // 🛑 FIX: Use the universal App Access Token for the App-level upload endpoint
         const appAccessToken = `${appId}|${appSecret}`;
 
@@ -550,13 +550,13 @@ const uploadSampleToMeta = async (mediaUrl) => {
         // 2. Create Upload Session
         const sessionRes = await fetch(
             `https://graph.facebook.com/v21.0/${appId}/uploads?file_length=${fileLength}&file_type=${fileType}`,
-            { 
+            {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${appAccessToken}` }
             }
         );
         const sessionData = await sessionRes.json();
-        
+
         if (!sessionData.id) {
             console.error("Meta Session Error:", sessionData);
             return null;
@@ -575,7 +575,7 @@ const uploadSampleToMeta = async (mediaUrl) => {
             }
         );
         const uploadData = await uploadRes.json();
-        
+
         return uploadData.h || null; // Returns the required header_handle
     } catch (err) {
         console.error("Meta Media Upload Error:", err);
@@ -609,11 +609,11 @@ export const verifyMetaTemplate = async (req, res, next) => {
             if (!crmTemplate) continue;
 
             const metaName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-            
+
             // 1. Sanitize Variables
             let metaBodyText = crmTemplate.body;
             let exampleData = [];
-            
+
             const varMatches = metaBodyText.match(/\{\{(.+?)\}\}/g);
             if (varMatches) {
                 varMatches.forEach((match, index) => {
@@ -622,9 +622,9 @@ export const verifyMetaTemplate = async (req, res, next) => {
                 });
             }
 
-            const components = [{ 
-                type: "BODY", 
-                text: metaBodyText 
+            const components = [{
+                type: "BODY",
+                text: metaBodyText
             }];
 
             if (exampleData.length > 0) {
@@ -641,11 +641,11 @@ export const verifyMetaTemplate = async (req, res, next) => {
                     components.push({
                         type: "HEADER",
                         format: "IMAGE",
-                        example: { header_handle: [handle] } 
+                        example: { header_handle: [handle] }
                     });
                 } else {
                     results.push({ id, name: crmTemplate.name, success: false, error: "Failed to upload image sample to Meta." });
-                    continue; 
+                    continue;
                 }
             } else if (crmTemplate.whatsappMediaType === "document" && mediaUrl) {
                 const handle = await uploadSampleToMeta(mediaUrl);
@@ -682,28 +682,116 @@ export const verifyMetaTemplate = async (req, res, next) => {
             );
 
             const data = await metaRes.json();
-            
+
             if (data.error) {
                 console.error(`\n❌ [META REJECTION] Template: ${crmTemplate.name}`);
                 console.error(JSON.stringify(data.error, null, 2));
 
                 let deepError = data.error.message;
                 if (data.error.error_user_msg) deepError += ` - ${data.error.error_user_msg}`;
-                
+
                 results.push({ id, name: crmTemplate.name, success: false, error: deepError });
             } else {
                 results.push({ id, name: crmTemplate.name, success: true, error: null });
             }
         }
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             message: `Processed ${idsToVerify.length} template(s) for verification.`,
-            results 
+            results
         });
     } catch (err) {
         console.error("❌ Verify Template Error:", err.message);
         next(new ApiError(500, "Internal server error while submitting templates"));
+    }
+};
+
+
+// ==========================================
+// SEND META TEMPLATE MESSAGE (Direct/Quick Send)
+// ==========================================
+export const sendMetaTemplateMessage = async (req, res, next) => {
+    try {
+        const adminId = req.admin.id;
+        const { toPhone, targetIds, templateId, templateName } = req.body;
+
+        const config = await prisma.whatsAppMetaConfig.findUnique({ where: { adminId } });
+        if (!config || config.activeProvider !== "meta") return next(new ApiError(400, "WhatsApp not configured."));
+
+        // Support passing either a specific CRM template ID, or a raw Meta template name
+        let metaTemplateName = templateName;
+        let crmTemplate = null;
+
+        if (templateId) {
+            crmTemplate = await prisma.template.findUnique({ where: { id: templateId } });
+            if (!crmTemplate) return next(new ApiError(404, "Template not found."));
+            metaTemplateName = crmTemplate.name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+        }
+
+        // Determine targets (either a direct phone number from Inbox, or array of IDs from Template Tab)
+        let phones = [];
+        if (toPhone) phones.push(toPhone.replace(/\D/g, ""));
+        if (targetIds && targetIds.length > 0) {
+            const customers = await prisma.customer.findMany({
+                where: { id: { in: targetIds } },
+                select: { ContactNumber: true, customerName: true }
+            });
+            phones = [...phones, ...customers.map(c => c.ContactNumber.replace(/\D/g, ""))];
+        }
+
+        if (phones.length === 0) return next(new ApiError(400, "No valid phone numbers provided."));
+
+        let sentCount = 0;
+
+        for (const cleanPhone of phones) {
+            // Send to Meta API
+            const metaRes = await fetch(
+                `https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${config.accessToken}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        messaging_product: "whatsapp",
+                        to: cleanPhone,
+                        type: "template",
+                        template: {
+                            name: metaTemplateName,
+                            language: { code: "en_US" }
+                            // Note: Add components array here if you need dynamic {{1}} replacements
+                        }
+                    })
+                }
+            );
+
+            const metaData = await metaRes.json();
+
+            if (!metaData.error) {
+                sentCount++;
+                // Log it to the Inbox database so it shows up in chat history
+                await prisma.whatsAppMessage.create({
+                    data: {
+                        adminId,
+                        phoneKey: cleanPhone.slice(-10),
+                        waId: metaData.messages[0].id,
+                        fromMe: true,
+                        type: "template",
+                        body: crmTemplate ? crmTemplate.body : `Template Sent: ${metaTemplateName}`,
+                        status: "sent",
+                        isRead: true,
+                        source: "meta",
+                        timestamp: new Date()
+                    }
+                });
+            }
+        }
+
+        res.status(200).json({ success: true, message: `Template sent to ${sentCount} recipients.` });
+    } catch (error) {
+        next(new ApiError(500, "Failed to send template."));
     }
 };
 

@@ -1,6 +1,6 @@
 import express from "express";
 import { protectRoute } from "../middlewares/auth.js";
-import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost} from "../controllers/controller.socialAuth.js";
+import { disconnectFacebook, disconnectInstagram, getFacebookAnalytics, getFacebookLivePosts, getInstagramAnalytics, getInstagramLivePosts, getScheduledPosts, metaCallback, runAutoSocialAgent, scheduleFacebookPost, scheduleInstagramPost } from "../controllers/controller.socialAuth.js";
 import upload from "../config/multer.js";
 import { checkWhatsAppConnection, connectMetaWhatsapp, disconnectMetaWhatsapp, getMetaChatHistory, getMetaInboxSummary, getMetaTemplates, markMetaChatRead, receiveWhatsAppMessage, sendMetaWhatsAppMessage, verifyMetaTemplate, verifyWhatsAppWebhook } from "../controllers/controller.whatsappMeta.js";
 import { createCampaign, deleteCampaign, getCampaigns, startCampaign } from "../controllers/controller.whatsappCampaign.js";
@@ -57,8 +57,8 @@ socialAuthRoutes.get("/meta-inbox/chat/:phoneKey", getMetaChatHistory);
 socialAuthRoutes.post("/meta-inbox/chat/:phoneKey/read", markMetaChatRead);
 
 //template of meta whastapp
-socialAuthRoutes.get("/meta-templates",getMetaTemplates);
-socialAuthRoutes.post("/verify-meta-template",verifyMetaTemplate);
+socialAuthRoutes.get("/meta-templates", getMetaTemplates);
+socialAuthRoutes.post("/verify-meta-template", verifyMetaTemplate);
 
 
 //whatsapp campaign
@@ -67,6 +67,7 @@ socialAuthRoutes.post("/meta-campaigns", createCampaign);
 socialAuthRoutes.get("/meta-campaigns", getCampaigns);
 socialAuthRoutes.post("/meta-campaigns/:campaignId/start", startCampaign);
 socialAuthRoutes.delete("/meta-campaigns/:campaignId", deleteCampaign);
+socialAuthRoutes.post("/send-meta-template", sendMetaWhatsAppMessage);
 
 
 export default socialAuthRoutes;
